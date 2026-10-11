@@ -1,0 +1,20 @@
+name: Supabase wachhalten (Experiment)
+
+# Supabase pausiert Gratis-Projekte nach 7 Tagen ohne Aktivität. Dieser Aufruf ruft alle
+# 3 Tage die Datenbankfunktion ping() auf (liefert nur die Serverzeit). Ob Supabase das als «Aktivität» zählt, ist NICHT belegt
+# und wird nach dem Start geprüft (siehe README, Abschnitt «Pausen-Risiko»).
+on:
+  schedule:
+    - cron: '17 6 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Anfrage an die Datenbank-API
+        run: |
+          curl --fail --silent --show-error --max-time 30 -X POST \
+            -H "apikey: sb_publishable_UZ9xCSSYw4bRn91rOWiFpg_IjZIIay6" \
+            -H "Content-Type: application/json" -d '{}' \
+            "https://lwogbvgaqgohwncyyebg.supabase.co/rest/v1/rpc/ping" -w "\nHTTP %{http_code}\n"
