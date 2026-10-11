@@ -1,0 +1,25 @@
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource/source-sans-3/400.css';
+@import '@fontsource/source-sans-3/600.css';
+@import 'tailwindcss';
+
+@theme {
+  --color-ink: #16232f;
+  --color-ink-soft: #4a5a68;
+  --color-paper: #f3f5f7;
+  --color-card: #ffffff;
+  --color-line: #d8dee4;
+  --color-teal: #0e7c86;
+  --color-teal-dark: #0a5f67;
+  --color-teal-light: #2fb3bd;
+  --color-mustard: #e3a72f;
+  --color-danger: #b8402c;
+  --font-display: 'Bricolage Grotesque Variable', 'Source Sans 3', system-ui, sans-serif;
+  --font-sans: 'Source Sans 3', system-ui, sans-serif;
+}
+
+html { color-scheme: light; }
+body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); font-size: 1.0625rem; line-height: 1.55; }
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; line-height: 1.15; }
+:focus-visible { outline: 3px solid var(--color-teal-light); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
