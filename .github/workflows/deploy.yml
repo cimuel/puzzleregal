@@ -3,7 +3,8 @@ name: Veröffentlichen (GitHub Pages)
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -18,40 +19,44 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Repository auschecken
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Abhängigkeiten installieren
+        run: npm ci
 
-      - run: npm test
+      - name: Tests ausführen
+        run: npm test
 
-      - name: Build
+      - name: App bauen
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
 
-      - uses: actions/configure-pages@v5
+      - name: GitHub Pages konfigurieren
+        uses: actions/configure-pages@v5
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Build-Dateien bereitstellen
+        uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
-
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-      - id: deployment
+      - name: Auf GitHub Pages veröffentlichen
+        id: deployment
         uses: actions/deploy-pages@v4
 ```
