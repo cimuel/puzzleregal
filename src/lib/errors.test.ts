@@ -17,6 +17,9 @@ describe('friendlyError', () => {
   it('meldet fehlende Berechtigung verständlich', () => {
     expect(friendlyError('Nicht berechtigt')).toBe('Dafür fehlt dir die Berechtigung.')
   })
+  it('erklärt doppelte Puzzles', () => {
+    expect(friendlyError('duplicate key value violates unique constraint "puzzles_brand_product_no_key"')).toContain('gibt es schon')
+  })
   it('liefert bei leerer Meldung einen Standardtext', () => {
     expect(friendlyError(undefined)).toContain('Unbekannter Fehler')
   })

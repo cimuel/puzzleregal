@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase'
 import { friendlyError } from '../lib/errors'
 import { Button, Card, Field, Notice } from '../components/ui'
 
-export function Profile() {
+/** Anzeigename ändern (nur für das eigene Profil). */
+export function NameCard() {
   const { profile, reloadProfile } = useAuth()
   const [name, setName] = useState(profile?.display_name ?? '')
   const [msg, setMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
@@ -21,16 +22,13 @@ export function Profile() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-3xl font-bold">Mein Profil</h1>
-      <Card className="max-w-md">
-        <form onSubmit={save} className="flex flex-col gap-4">
-          <Field label="Anzeigename" required minLength={2} maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
-          {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
-          <Button type="submit">Speichern</Button>
-        </form>
-      </Card>
-      <p className="text-ink-soft">Statistiken und Bestleistungen erscheinen hier, sobald Zeiten erfasst werden können (Phase 3).</p>
-    </div>
+    <Card className="max-w-md">
+      <h2 className="mb-3 text-xl font-bold">Anzeigename ändern</h2>
+      <form onSubmit={save} className="flex flex-col gap-4">
+        <Field label="Anzeigename" required minLength={2} maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+        {msg && <Notice kind={msg.kind}>{msg.text}</Notice>}
+        <Button type="submit">Speichern</Button>
+      </form>
+    </Card>
   )
 }

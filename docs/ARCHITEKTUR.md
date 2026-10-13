@@ -1,4 +1,4 @@
-# Architektur und Entscheide (Stand Phase 2)
+# Architektur und Entscheide (Stand Phase 3)
 
 | Thema | Entscheid | Grund |
 |---|---|---|
@@ -15,7 +15,20 @@
 | Fotos | öffentlich lesbarer Bucket, zufällige Dateinamen, Schreiben nur im eigenen Ordner | einfach; Fotos von Schachteln sind unkritisch |
 | E-Mail | Bestätigung aus | Supabase-Standardversand erreicht nur Team-Adressen |
 
+| Puzzles/Versuche anlegen | nur über Datenbankfunktionen (`add_puzzle`, `add_attempt`) | atomar und geprüft; direktes Schreiben ist gesperrt |
+| Ähnliche Puzzles | `find_similar_puzzles` (pg_trgm, Titelähnlichkeit) | Warnung vor Doppelten; Marke+Produktnummer ist hart eindeutig |
+| Ranglisten/Statistiken | Datenbankfunktionen, berechnet aus den Versuchen | keine doppelte Datenhaltung |
+| Geschwindigkeit | gewichtet: Σ Teile ÷ Σ Minuten | verhindert, dass kurze Puzzles den Schnitt verzerren |
+| Teamzeiten | getrennte Ranglisten, nicht in Einzelstatistiken | Teamzeit ist keine persönliche Leistung |
+| Fotos | im Browser auf max. 1280 px und WebP verkleinert | bleibt unter 1 MB, spart Speicher |
+
 ## Bekannte Lücken (bewusst offen)
+- Mitglieder können beim Erfassen eines Puzzles Veranstaltungen und Runden neu anlegen (finden oder anlegen). Es gibt noch
+  keine Oberfläche, um falsche Einträge zu löschen (Admin vorerst per SQL). Kommt mit Phase 5.
+- Puzzles können in der Oberfläche nicht gelöscht werden (nur Admin per SQL; Exemplare und Versuche blockieren es bewusst).
+- Bei Versuchen lassen sich Puzzle und Teilnehmende nicht nachträglich ändern (löschen und neu erfassen).
+- Keine Seitenaufteilung der Listen: ausgelegt auf eine Community mit einigen hundert Puzzles.
+- Ausleihen und Rangschätzung: Phasen 4 und 5.
 - Rangschätzung, Statistiken, Ausleihabläufe: Phasen 3 bis 5.
 - Mitglieder können über die Datenbank-API Teamversuche mit beliebigen Personen verknüpfen (Einzelversuche nicht).
   Eine Bestätigung durch die Genannten wäre eine mögliche Verschärfung.

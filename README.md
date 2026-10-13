@@ -2,9 +2,12 @@
 
 Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzle-Community.
 
-**Stand: Phase 2 von 6** (Grundaufbau). Funktioniert: Registrierung mit Einladungscode, Admin-Freigabe,
-Anmeldung, Berechtigungen in der Datenbank, Grundlayout, Adminbereich (Freigaben, Rollen, Einladungscodes).
-**Noch nicht gebaut:** Puzzles, Regale, Zeiten, Ranglisten (Phase 3), Ausleihen (Phase 4), Wettkampfimport (Phase 5).
+**Stand: Phase 3 von 6** (Kernfunktionen).
+- Phase 2: Registrierung mit Einladungscode, Admin-Freigabe, Anmeldung, Berechtigungen, Adminbereich.
+- Phase 3: Puzzles erfassen (mit Foto, Doppelt-Erkennung, optional Meisterschaft), Alle Puzzles (Suche, Filter, Sortierung),
+  Puzzle-Detailseite mit Rangliste, Regale (Karten, umschaltbare Sortierung), Zeiterfassung (Einzel, Paar, Team),
+  Personenprofil mit Statistiken und Verlauf.
+- **Noch nicht gebaut:** Ausleihen (Phase 4), Wettkampfimport und Rangschätzung (Phase 5).
 
 ## Aufbau
 
@@ -49,12 +52,22 @@ Anmeldung, Berechtigungen in der Datenbank, Grundlayout, Adminbereich (Freigaben
 2. Reiter **Actions**: Der Lauf «Veröffentlichen (GitHub Pages)» startet bei jedem Commit auf `main`.
    Grün = veröffentlicht. Adresse: `https://cimuel.github.io/puzzleregal/`
 
+## Update auf Phase 3 einspielen (wenn Phase 2 schon läuft)
+
+**Reihenfolge einhalten: zuerst die Datenbank, dann der Code.**
+1. Supabase, **SQL Editor**, **New query**: Inhalt von `supabase/migrations/0003_phase3_kernfunktionen.sql` einfügen, **Run**.
+   Erwartet: «Success». Meldet er einen Fehler bei `create extension pg_trgm`, schick mir den Text (die Erweiterung dient
+   nur der Erkennung ähnlicher Titel). Die Datei nur **einmal** ausführen.
+2. GitHub: den **gesamten** Inhalt des entpackten Ordners nochmals hochladen (Upload files, alles markieren, ziehen,
+   Commit). `package.json` und `package-lock.json` müssen mit, sonst schlägt der Bauablauf fehl.
+3. Reiter **Actions**: warten, bis der Lauf grün ist. Seite mit Strg + F5 neu laden.
+
 ## Entwickeln und Testen
 
 ```bash
 npm install
 npm run dev        # lokale Vorschau
-npm test           # Frontend-Tests
+npm test           # Frontend-Tests (Rechenfunktionen und Rauchtests der Seiten)
 npm run build      # Typprüfung + Produktionsbuild
 npm run test:db    # Datenbanktests (braucht lokale PostgreSQL, siehe supabase/tests/db_test.py)
 ```
@@ -68,3 +81,11 @@ Pro-Plan (25 USD/Monat). GitHub deaktiviert geplante Abläufe ausserdem nach 60 
 ## Sichtbarkeit (Entscheid)
 Öffentlich: nur die Startseite ohne Daten. Alles andere: nur freigegebene, angemeldete Mitglieder.
 Wartende und gesperrte Konten sehen keine Puzzles, Zeiten oder Profile anderer.
+
+## Kennzahlen (Definitionen)
+- **Beste Zeit pro Puzzle:** kürzeste gültige Zeit der Person für dieses Puzzle.
+- **Durchschnittliche Lösungszeit:** Mittel aller Versuche. Mischt verschieden grosse Puzzles; die Anzahl Versuche steht dabei.
+- **Durchschnittliche Geschwindigkeit:** Summe aller Teile ÷ Summe aller Minuten (gewichtet, nicht der Mittelwert einzelner Werte).
+- **Geschwindigkeit eines Versuchs:** Teile ÷ Minuten dieses einen Versuchs. Teile pro Stunde = Teile pro Minute × 60.
+- **Rang:** gleiche Zeit ergibt gleichen Rang, danach wird übersprungen (1, 2, 2, 4).
+- **Persönliche Statistiken** zählen standardmässig nur **Einzelversuche**. Paar- und Teamzeiten sind getrennt wählbar.

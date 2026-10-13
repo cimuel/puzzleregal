@@ -15,8 +15,8 @@ export function Home() {
     <div className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold">Hallo {profile?.display_name}</h1>
       <p className="max-w-prose text-ink-soft">
-        Die Grundlage steht: Anmeldung, Freigabe und Berechtigungen laufen. Puzzles, Zeiten und Ausleihen folgen in den
-        nächsten Phasen.
+        Erfasse Puzzles mit Foto, trage Zeiten ein und vergleiche dich in den Ranglisten. Das Ausleihen folgt in der
+        nächsten Phase.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         {entries.map((e) => (

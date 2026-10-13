@@ -7,7 +7,15 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Waiting } from './pages/Waiting'
 import { Home } from './pages/Home'
-import { Profile } from './pages/Profile'
+import { PlayerProfile } from './pages/PlayerProfile'
+import { Puzzles } from './pages/Puzzles'
+import { PuzzleNew } from './pages/PuzzleNew'
+import { PuzzleDetail } from './pages/PuzzleDetail'
+import { PuzzleEdit } from './pages/PuzzleEdit'
+import { AttemptNew } from './pages/AttemptNew'
+import { AttemptEdit } from './pages/AttemptEdit'
+import { Shelf } from './pages/Shelf'
+import { Shelves } from './pages/Shelves'
 import { Admin } from './pages/Admin'
 import { Placeholder } from './pages/Placeholder'
 
@@ -24,14 +32,19 @@ export default function App() {
           <Route element={<RequireApproved />}>
             <Route element={<Layout />}>
               <Route path="/start" element={<Home />} />
-              <Route path="/puzzles" element={<Placeholder title="Alle Puzzles" phase="Phase 3" />} />
-              <Route path="/regale" element={<Placeholder title="Alle Regale" phase="Phase 3" />} />
-              <Route path="/mein-regal" element={<Placeholder title="Mein Regal" phase="Phase 3" />} />
-              <Route path="/puzzle-neu" element={<Placeholder title="Neues Puzzle erfassen" phase="Phase 3" />} />
-              <Route path="/versuch-neu" element={<Placeholder title="Neuen Versuch erfassen" phase="Phase 3" />} />
+              <Route path="/puzzles" element={<Puzzles />} />
+              <Route path="/puzzle/:id" element={<PuzzleDetail />} />
+              <Route path="/puzzle/:id/bearbeiten" element={<PuzzleEdit />} />
+              <Route path="/puzzle-neu" element={<PuzzleNew />} />
+              <Route path="/regale" element={<Shelves />} />
+              <Route path="/regal/:id" element={<Shelf />} />
+              <Route path="/mein-regal" element={<Shelf own />} />
+              <Route path="/versuch-neu" element={<AttemptNew />} />
+              <Route path="/versuch/:id/bearbeiten" element={<AttemptEdit />} />
               <Route path="/ausleihen/anfragen" element={<Placeholder title="Ausleihanfragen" phase="Phase 4" />} />
               <Route path="/ausleihen/meine" element={<Placeholder title="Eigene Ausleihen" phase="Phase 4" />} />
-              <Route path="/profil" element={<Profile />} />
+              <Route path="/profil" element={<PlayerProfile own />} />
+              <Route path="/person/:id" element={<PlayerProfile />} />
               <Route element={<RequireAdmin />}>
                 <Route path="/admin" element={<Admin />} />
               </Route>

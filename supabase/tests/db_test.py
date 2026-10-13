@@ -17,9 +17,9 @@ def run_file(conn, path):
 def setup():
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("drop schema if exists public cascade; create schema public;")
-        conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade;")
+        conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -52,6 +52,13 @@ class Ctx:
     def puzzle(self, creator, title="Alpen", brand="Ravensburger", no="12345", pieces=1000):
         return self.sql("insert into public.puzzles (title, brand, product_no, piece_count, created_by) "
                         "values (%s,%s,%s,%s,%s) returning id", title, brand, no, pieces, creator).fetchone()[0]
+    def attempt(self, uid, puzzle, seconds, team=1, kind="training", day="2026-01-01", parts=None):
+        """Versuch direkt (als Superuser) anlegen, mit Teilnehmenden."""
+        aid = self.sql("insert into public.attempts (puzzle_id, duration_seconds, created_by, team_size, kind, solved_on) "
+                       "values (%s,%s,%s,%s,%s,%s) returning id", puzzle, seconds, uid, team, kind, day).fetchone()[0]
+        for pid in (parts or [uid]):
+            self.sql("insert into public.attempt_participants values (%s,%s)", aid, pid)
+        return aid
     def copy(self, puzzle, owner):
         return self.sql("insert into public.copies (puzzle_id, owner_id) values (%s,%s) returning id",
                         puzzle, owner).fetchone()[0]
@@ -210,10 +217,9 @@ def einladungscodes_nur_fuer_admins(c):
 
 # ---------------- Puzzles und Exemplare ----------------
 @test
-def puzzle_nur_im_eigenen_namen_erfassen(c):
-    anna = c.user("Anna"); bea = c.user("Bea"); c.as_(anna)
-    raises(c, E.Error, "insert into public.puzzles (title, piece_count, created_by) values ('x', 10, %s)", bea)
-    c.conn.execute("insert into public.puzzles (title, piece_count, created_by) values ('x', 10, %s)", (anna,))
+def puzzle_nur_ueber_funktion_erfassen_nicht_direkt(c):
+    anna = c.user("Anna"); c.as_(anna)
+    raises(c, E.InsufficientPrivilege, "insert into public.puzzles (title, piece_count, created_by) values ('x', 10, %s)", anna)
 
 @test
 def doppeltes_puzzle_gleiche_marke_und_nummer_wird_verhindert(c):
@@ -294,13 +300,16 @@ def standortansicht_nicht_fuer_wartende(c):
 @test
 def versuche_nur_vom_ersteller_aenderbar(c):
     anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna)
-    c.as_(anna)
-    aid = c.conn.execute("insert into public.attempts (puzzle_id, duration_seconds, created_by) values (%s, 3000, %s) returning id", (p, anna)).fetchone()[0]
-    c.conn.execute("insert into public.attempt_participants values (%s,%s)", (aid, anna))
+    aid = c.attempt(anna, p, 3000)
     c.as_(bea)
     assert c.conn.execute("select count(*) from public.attempts").fetchone()[0] == 1
     assert c.conn.execute("update public.attempts set duration_seconds=1 where id=%s", (aid,)).rowcount == 0
     assert c.conn.execute("delete from public.attempts where id=%s", (aid,)).rowcount == 0
+    c.as_(anna)
+    assert c.conn.execute("update public.attempts set duration_seconds=2900 where id=%s", (aid,)).rowcount == 1
+    raises(c, E.InsufficientPrivilege, "update public.attempts set team_size=4 where id=%s", aid)
+    raises(c, E.InsufficientPrivilege, "update public.attempts set created_by=%s where id=%s", anna, aid)
+    assert c.conn.execute("delete from public.attempts where id=%s", (aid,)).rowcount == 1
 
 @test
 def versuch_im_namen_anderer_wird_verhindert(c):
@@ -309,11 +318,11 @@ def versuch_im_namen_anderer_wird_verhindert(c):
 
 @test
 def einzelversuch_nur_fuer_sich_teamversuch_mit_anderen(c):
-    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna); c.as_(anna)
-    solo = c.conn.execute("insert into public.attempts (puzzle_id, duration_seconds, created_by, team_size) values (%s, 3000, %s, 1) returning id", (p, anna)).fetchone()[0]
-    raises(c, E.Error, "insert into public.attempt_participants values (%s,%s)", solo, bea)
-    team = c.conn.execute("insert into public.attempts (puzzle_id, duration_seconds, created_by, team_size) values (%s, 3000, %s, 4) returning id", (p, anna)).fetchone()[0]
-    c.conn.execute("insert into public.attempt_participants values (%s,%s)", (team, bea))
+    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna)
+    c.as_(anna)
+    raises(c, E.RaiseException, "select public.add_attempt(%s, current_date, 3000, 'training', 1::smallint, null, null, %s::uuid[])", p, [anna, bea])
+    raises(c, E.RaiseException, "select public.add_attempt(%s, current_date, 3000, 'training', 4::smallint, null, null, %s::uuid[])", p, [bea])
+    c.conn.execute("select public.add_attempt(%s, current_date, 3000, 'training', 4::smallint, null, null, %s::uuid[])", (p, [anna, bea]))
 
 @test
 def ungueltige_dauer_wird_abgelehnt(c):
@@ -360,6 +369,244 @@ def foto_upload_nur_im_eigenen_ordner_und_nur_freigegeben(c):
     raises(c, E.Error, "insert into storage.objects (bucket_id, name) values ('puzzle-images', %s)", f"{bea}/b.webp")
     c.as_(neu)
     raises(c, E.Error, "insert into storage.objects (bucket_id, name) values ('puzzle-images', %s)", f"{neu}/c.webp")
+
+# ---------------- Phase 3: Puzzle erfassen ----------------
+@test
+def add_puzzle_legt_puzzle_und_exemplar_an(c):
+    anna = c.user("Anna"); c.as_(anna)
+    pid = c.conn.execute("select public.add_puzzle(' Alpenpanorama ', 'Ravensburger', '17000', 1000)").fetchone()[0]
+    assert c.conn.execute("select title, created_by from public.puzzles where id=%s", (pid,)).fetchone() == ("Alpenpanorama", anna)
+    assert c.conn.execute("select owner_id from public.copies where puzzle_id=%s", (pid,)).fetchone()[0] == anna
+
+@test
+def add_puzzle_ohne_exemplar_und_mit_pruefungen(c):
+    anna = c.user("Anna"); c.as_(anna)
+    pid = c.conn.execute("select public.add_puzzle('X', null, null, 500, null, null, null, false)").fetchone()[0]
+    assert c.conn.execute("select count(*) from public.copies where puzzle_id=%s", (pid,)).fetchone()[0] == 0
+    raises(c, E.RaiseException, "select public.add_puzzle('   ', null, null, 500)")
+    raises(c, E.RaiseException, "select public.add_puzzle('Y', null, null, 0)")
+    raises(c, E.RaiseException, "select public.add_puzzle('Y', null, null, 100, 'fremder-ordner/bild.webp')")
+
+@test
+def add_puzzle_doppelte_marke_und_nummer_gibt_klare_meldung(c):
+    anna = c.user("Anna"); c.as_(anna)
+    c.conn.execute("select public.add_puzzle('A', 'Ravensburger', '17000', 1000)")
+    c.conn.execute("savepoint s")
+    try:
+        c.conn.execute("select public.add_puzzle('B', 'ravensburger ', '17000', 1000)")
+        raise AssertionError("keine Ausnahme")
+    except E.RaiseException as e:
+        assert "gibt es schon" in str(e)
+        c.conn.execute("rollback to savepoint s")
+
+@test
+def add_puzzle_nur_fuer_freigegebene(c):
+    neu = c.user("Neu", status="pending"); c.as_(neu)
+    raises(c, E.InsufficientPrivilege, "select public.add_puzzle('A', null, null, 100)")
+
+@test
+def add_puzzle_verknuepft_veranstaltung_und_verhindert_konflikte(c):
+    anna = c.user("Anna"); c.as_(anna)
+    p1 = c.conn.execute("select public.add_puzzle('A', null, null, 1000, null, null, null, true, 'SPM', 2026, 'Teams Finale', 4::smallint, 'https://example.org/res')").fetchone()[0]
+    row = c.conn.execute("select e.name, e.year, r.name, r.team_size, r.piece_count, r.puzzle_id, r.results_url from public.rounds r join public.events e on e.id=r.event_id").fetchone()
+    assert row == ("SPM", 2026, "Teams Finale", 4, 1000, p1, "https://example.org/res"), row
+    raises(c, E.RaiseException, "select public.add_puzzle('B', null, null, 1000, null, null, null, true, ' spm ', 2026, 'teams finale', 4::smallint)")
+    raises(c, E.RaiseException, "select public.add_puzzle('C', null, null, 1000, null, null, null, true, 'SPM', null, 'Finale', 4::smallint)")
+    raises(c, E.RaiseException, "select public.add_puzzle('D', null, null, 1000, null, null, null, true, 'SPM', 2026, 'Finale', 4::smallint, 'javascript:alert(1)')")
+
+@test
+def link_puzzle_to_round_nur_fuer_berechtigte(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); adm = c.user("Admin", role="admin")
+    p = c.puzzle(anna)
+    c.as_(bea)
+    raises(c, E.InsufficientPrivilege, "select public.link_puzzle_to_round(%s, 'SPM', 2026, 'Finale', 1::smallint)", p)
+    c.as_(anna)
+    c.conn.execute("select public.link_puzzle_to_round(%s, 'SPM', 2026, 'Finale', 1::smallint)", (p,))
+    c.as_(adm)
+    c.conn.execute("select public.link_puzzle_to_round(%s, 'SPM', 2026, 'Qualifikation', 1::smallint)", (p,))
+
+@test
+def aehnliche_puzzles_werden_gefunden(c):
+    anna = c.user("Anna")
+    c.puzzle(anna, title="Alpenpanorama bei Sonnenaufgang", brand="Ravensburger", no="17000", pieces=1000)
+    c.as_(anna)
+    same = c.conn.execute("select reason, score from public.find_similar_puzzles('Anderer Titel', 'ravensburger', '17000', 500)").fetchall()
+    assert same and same[0][0] == "same_product_no" and same[0][1] == 1.0, same
+    sim = c.conn.execute("select reason from public.find_similar_puzzles('Alpenpanorama bei Sonnenaufgang!', null, null, 1000)").fetchall()
+    assert sim and sim[0][0] == "similar_title", sim
+    none = c.conn.execute("select * from public.find_similar_puzzles('Katzen im Garten', 'Heye', '999', 2000)").fetchall()
+    assert none == [], none
+
+@test
+def teilezahl_nicht_mehr_aenderbar_nach_erfassten_zeiten(c):
+    anna = c.user("Anna"); p = c.puzzle(anna, pieces=1000)
+    c.as_(anna)
+    assert c.conn.execute("update public.puzzles set piece_count=1000, notes='ok' where id=%s", (p,)).rowcount == 1
+    assert c.conn.execute("update public.puzzles set piece_count=500 where id=%s", (p,)).rowcount == 1
+    c.attempt(anna, p, 3000)
+    c.as_(anna)
+    raises(c, E.RaiseException, "update public.puzzles set piece_count=900 where id=%s", p)
+
+# ---------------- Phase 3: Versuche erfassen ----------------
+@test
+def add_attempt_einzelversuch_standardmaessig_fuer_sich(c):
+    anna = c.user("Anna"); p = c.puzzle(anna); c.as_(anna)
+    aid = c.conn.execute("select public.add_attempt(%s, '2026-05-01', 3000)", (p,)).fetchone()[0]
+    assert c.conn.execute("select profile_id from public.attempt_participants where attempt_id=%s", (aid,)).fetchall() == [(anna,)]
+    assert c.conn.execute("select kind, team_size from public.attempts where id=%s", (aid,)).fetchone() == ("training", 1)
+
+@test
+def add_attempt_prueft_eingaben(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); neu = c.user("Neu", status="pending"); p = c.puzzle(anna); c.as_(anna)
+    q = "select public.add_attempt(%s, %s, %s, 'training', %s::smallint, null, null, %s::uuid[])"
+    raises(c, E.RaiseException, q, p, "2999-01-01", 3000, 1, None)         # Zukunft
+    raises(c, E.RaiseException, q, p, "2026-01-01", 0, 1, None)            # Dauer
+    raises(c, E.RaiseException, q, p, "2026-01-01", 3000, 4, [bea])        # man selbst fehlt
+    raises(c, E.RaiseException, q, p, "2026-01-01", 3000, 2, [anna, bea, neu])  # mehr als Teamgrösse
+    raises(c, E.RaiseException, q, p, "2026-01-01", 3000, 4, [anna, neu])  # nicht freigegeben
+    raises(c, E.RaiseException, q, "00000000-0000-0000-0000-000000000000", "2026-01-01", 3000, 1, None)
+
+@test
+def add_attempt_team_darf_kleiner_besetzt_sein_als_teamgroesse(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna); c.as_(anna)
+    aid = c.conn.execute("select public.add_attempt(%s, '2026-05-01', 4000, 'training', 4::smallint, null, null, %s::uuid[])", (p, [anna, bea])).fetchone()[0]
+    assert c.conn.execute("select count(*) from public.attempt_participants where attempt_id=%s", (aid,)).fetchone()[0] == 2
+
+@test
+def add_attempt_mit_runde_prueft_puzzle_teamgroesse_und_art(c):
+    anna = c.user("Anna"); p = c.puzzle(anna); other = c.puzzle(anna, title="Anderes", no="2", brand="Heye")
+    c.as_(anna)
+    c.conn.execute("select public.link_puzzle_to_round(%s, 'SPM', 2026, 'Finale', 1::smallint)", (p,))
+    rid = c.conn.execute("select id from public.rounds").fetchone()[0]
+    q = "select public.add_attempt(%s, '2026-05-01', 3000, %s, %s::smallint, %s)"
+    c.conn.execute(q, (p, "official", 1, rid))
+    raises(c, E.RaiseException, q, p, "training", 1, rid)    # Art muss offiziell sein
+    raises(c, E.RaiseException, q, p, "official", 4, rid)    # Teamgrösse passt nicht
+    raises(c, E.RaiseException, q, other, "official", 1, rid)  # falsches Puzzle
+
+@test
+def direkte_inserts_auf_versuche_sind_gesperrt(c):
+    anna = c.user("Anna"); p = c.puzzle(anna); c.as_(anna)
+    raises(c, E.InsufficientPrivilege, "insert into public.attempts (puzzle_id, duration_seconds, created_by) values (%s, 3000, %s)", p, anna)
+    raises(c, E.InsufficientPrivilege, "insert into public.attempt_participants values (gen_random_uuid(), %s)", anna)
+
+# ---------------- Phase 3: Ranglisten und Statistiken ----------------
+@test
+def rangliste_gleichstand_ueberspringt_rang_und_rechnet_teile_pro_minute(c):
+    names = ["Anna", "Bea", "Cor", "Dani", "Eva"]; u = {n: c.user(n) for n in names}
+    p = c.puzzle(u["Anna"], pieces=1000)
+    for n, sec in [("Anna", 3000), ("Bea", 3300), ("Cor", 3300), ("Dani", 3600)]:
+        c.attempt(u[n], p, sec)
+    c.attempt(u["Anna"], p, 3200)  # zweiter, schlechterer Versuch zählt nur als Versuch
+    c.as_(u["Eva"])
+    rows = c.conn.execute("select rank, display_name, best_seconds, pieces_per_minute, attempts_count from public.puzzle_leaderboard(%s)", (p,)).fetchall()
+    assert [(r[0], r[1]) for r in rows] == [(1, "Anna"), (2, "Bea"), (2, "Cor"), (4, "Dani")], rows
+    assert float(rows[0][3]) == 20.0 and rows[0][4] == 2, rows[0]       # 1000 / 50 min = 20
+    assert float(rows[3][3]) == round(1000 / 60, 2)
+
+@test
+def rangliste_trennt_offizielle_und_training_sowie_einzel_und_team(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna)
+    c.attempt(anna, p, 3000, kind="training")
+    c.attempt(anna, p, 3500, kind="official")
+    c.attempt(bea, p, 3200, kind="official")
+    c.attempt(anna, p, 1000, team=4, parts=[anna, bea])   # Teamzeit darf die Einzelrangliste nicht beeinflussen
+    c.as_(bea)
+    alle = c.conn.execute("select display_name, best_seconds from public.puzzle_leaderboard(%s, false)", (p,)).fetchall()
+    off = c.conn.execute("select display_name, best_seconds from public.puzzle_leaderboard(%s, true)", (p,)).fetchall()
+    assert alle == [("Anna", 3000), ("Bea", 3200)], alle
+    assert off == [("Bea", 3200), ("Anna", 3500)], off
+
+@test
+def team_rangliste_gruppiert_nach_besetzung(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); cor = c.user("Cor"); p = c.puzzle(anna, pieces=1000)
+    c.attempt(anna, p, 4000, team=4, parts=[anna, bea])
+    c.attempt(anna, p, 3600, team=4, parts=[anna, bea])
+    c.attempt(cor, p, 3000, team=4, parts=[cor])
+    c.attempt(anna, p, 2000, team=1)
+    c.as_(bea)
+    rows = c.conn.execute("select rank, team_names, best_seconds, attempts_count from public.puzzle_team_leaderboard(%s, 4::smallint)", (p,)).fetchall()
+    assert rows == [(1, "Cor", 3000, 1), (2, "Anna, Bea", 3600, 2)], rows
+
+@test
+def statistik_rechnet_gewichtet_und_trennt_kennzahlen(c):
+    anna = c.user("Anna"); a = c.puzzle(anna, title="Klein", no="1", pieces=100); b = c.puzzle(anna, title="Gross", no="2", pieces=1000)
+    c.attempt(anna, a, 600); c.attempt(anna, b, 3000)          # 10 Teile/Min und 20 Teile/Min
+    c.attempt(anna, b, 500, team=4)                             # Team: zählt nicht im Bereich «solo»
+    c.as_(anna)
+    r = c.conn.execute("select * from public.player_summary(%s, 'solo')", (anna,)).fetchone()
+    attempts, distinct, avg_s, avg_p, tot_p, tot_s, ppm, best_ppm = r
+    assert (attempts, distinct, avg_s, avg_p, tot_p, tot_s) == (2, 2, 1800, 550, 1100, 3600), r
+    assert float(ppm) == round(1100 / 60, 2)          # gewichtet 18,33 – nicht der Mittelwert 15
+    assert float(best_ppm) == 20.0
+    t = c.conn.execute("select attempts_count, total_seconds from public.player_summary(%s, 'team')", (anna,)).fetchone()
+    assert t == (1, 500)
+    alle = c.conn.execute("select attempts_count from public.player_summary(%s, 'all')", (anna,)).fetchone()
+    assert alle == (3,)
+    leer = c.user("Leer")
+    c.as_(anna)
+    z = c.conn.execute("select attempts_count, avg_speed_ppm from public.player_summary(%s, 'solo')", (leer,)).fetchone()
+    assert z == (0, None), z
+    raises(c, E.RaiseException, "select * from public.player_summary(%s, 'unsinn')", anna)
+
+@test
+def beste_zeiten_pro_puzzle_mit_rang_im_vergleich(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna, pieces=500)
+    c.attempt(anna, p, 3000); c.attempt(anna, p, 2800); c.attempt(bea, p, 2500)
+    c.as_(anna)
+    r = c.conn.execute("select best_seconds, attempts_count, rank, members_count, fastest_seconds, best_ppm from public.player_puzzle_bests(%s, 'solo')", (anna,)).fetchone()
+    assert r[:5] == (2800, 2, 2, 2, 2500), r
+    assert float(r[5]) == round(500 / (2800 / 60), 2)
+
+@test
+def verlaufsdaten_sind_chronologisch(c):
+    anna = c.user("Anna"); p = c.puzzle(anna, pieces=500)
+    c.attempt(anna, p, 3000, day="2026-03-01"); c.attempt(anna, p, 2800, day="2026-01-01")
+    c.as_(anna)
+    rows = c.conn.execute("select solved_on, ppm from public.player_attempts(%s, 'solo')", (anna,)).fetchall()
+    assert [str(r[0]) for r in rows] == ["2026-01-01", "2026-03-01"], rows
+
+@test
+def regal_zeigt_besessene_und_ausgeliehene_exemplare(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); cor = c.user("Cor")
+    p1 = c.puzzle(anna, title="A", no="1", pieces=1000); p2 = c.puzzle(anna, title="B", no="2", pieces=500)
+    c1 = c.copy(p1, anna); c.copy(p2, anna)
+    c.sql("insert into public.loans (copy_id, borrower_id, status) values (%s,%s,'lent')", c1, bea)
+    c.attempt(bea, p1, 4000); c.attempt(bea, p1, 3900)
+    c.as_(cor)
+    ann = c.conn.execute("select title, is_on_loan, holder_name, owner_name from public.shelf_items(%s)", (anna,)).fetchall()
+    assert ann == [("B", False, "Anna", "Anna"), ("A", True, "Bea", "Anna")], ann   # sortiert nach Teilezahl
+    b = c.conn.execute("select title, owner_name, best_seconds, attempts_count from public.shelf_items(%s)", (bea,)).fetchall()
+    assert b == [("A", "Anna", 3900, 2)], b
+    assert c.conn.execute("select count(*) from public.shelf_items(%s)", (cor,)).fetchone()[0] == 0
+
+@test
+def mitgliederuebersicht_nur_freigegebene(c):
+    anna = c.user("Anna"); c.user("Wartet", status="pending"); c.user("Gesperrt", status="blocked")
+    p = c.puzzle(anna); c.copy(p, anna); c.attempt(anna, p, 3000)
+    c.as_(anna)
+    rows = c.conn.execute("select display_name, copies_owned, copies_held, solved_puzzles, attempts_count from public.member_overview()").fetchall()
+    assert rows == [("Anna", 1, 1, 1, 1)], rows
+
+@test
+def lesefunktionen_nur_fuer_freigegebene(c):
+    anna = c.user("Anna"); neu = c.user("Neu", status="pending"); p = c.puzzle(anna)
+    c.as_(neu)
+    for q, a in [("select * from public.puzzle_list()", ()), ("select * from public.puzzle_leaderboard(%s)", (p,)),
+                 ("select * from public.shelf_items(%s)", (anna,)), ("select * from public.member_overview()", ()),
+                 ("select * from public.player_summary(%s)", (anna,)), ("select * from public.puzzle_attempts(%s)", (p,))]:
+        raises(c, E.InsufficientPrivilege, q, *a)
+    c.as_(None, "anon")
+    raises(c, E.InsufficientPrivilege, "select * from public.puzzle_list()")
+
+@test
+def puzzle_liste_zaehlt_exemplare_loeser_und_bestzeit(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); p = c.puzzle(anna)
+    c.copy(p, anna); c.copy(p, bea)
+    c.attempt(anna, p, 3000); c.attempt(bea, p, 2900); c.attempt(anna, p, 100, team=4)
+    c.as_(bea)
+    r = c.conn.execute("select copies_count, solvers_count, best_seconds from public.puzzle_list()").fetchone()
+    assert r == (2, 2, 2900), r
 
 if __name__ == "__main__":
     setup()
