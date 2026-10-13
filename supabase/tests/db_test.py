@@ -19,7 +19,7 @@ def setup():
         conn.execute("drop schema if exists public cascade; create schema public;")
         conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -607,6 +607,201 @@ def puzzle_liste_zaehlt_exemplare_loeser_und_bestzeit(c):
     c.as_(bea)
     r = c.conn.execute("select copies_count, solvers_count, best_seconds from public.puzzle_list()").fetchone()
     assert r == (2, 2, 2900), r
+
+# ---------------- Phase 4: Ausleihe ----------------
+def loan_setup(c, lendable=True):
+    owner = c.user("Owner"); bor = c.user("Bor"); other = c.user("Other")
+    pz = c.puzzle(owner, title="Alpen", pieces=1000); cp = c.copy(pz, owner)
+    if not lendable:
+        c.sql("update public.copies set is_lendable=false where id=%s", cp)
+    return owner, bor, other, pz, cp
+
+def call(c, uid, fn, *args):
+    c.as_(uid)
+    return c.conn.execute(f"select public.{fn}", args).fetchone()[0]
+
+def status(c, loan):
+    return c.sql("select status from public.loans where id=%s", loan).fetchone()[0]
+
+@test
+def anfrage_erstellt_ausleihe_und_benachrichtigt_den_eigentuemer(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s, ' Darf ich? ')", cp)
+    assert status(c, loan) == "requested"
+    n = c.sql("select user_id, type, payload->>'puzzle_title', payload->>'user_name', payload->>'borrower_name', payload->>'message' from public.notifications").fetchall()
+    assert n == [(owner, "loan_requested", "Alpen", None, "Bor", "Darf ich?")], n
+
+@test
+def anfrage_regeln_eigenes_nicht_ausleihbar_doppelt_nachrichtenlaenge(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    c.as_(owner); raises(c, E.RaiseException, "select public.request_loan(%s)", cp)
+    call(c, bor, "request_loan(%s)", cp)
+    c.as_(bor); raises(c, E.RaiseException, "select public.request_loan(%s)", cp)
+    c.as_(other); raises(c, E.RaiseException, "select public.request_loan(%s, %s)", cp, "x" * 501)
+    owner2, bor2, other2, pz2, cp2 = loan_setup_second(c)
+
+def loan_setup_second(c):
+    a = c.user("Ann2"); b = c.user("Bob2"); pz = c.puzzle(a, title="Nicht", no="9", pieces=500); cp = c.copy(pz, a)
+    c.sql("update public.copies set is_lendable=false where id=%s", cp)
+    c.as_(b); raises(c, E.RaiseException, "select public.request_loan(%s)", cp)
+    return a, b, None, pz, cp
+
+@test
+def anfrage_nur_fuer_freigegebene_und_nicht_anonym(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    neu = c.user("Neu", status="pending")
+    c.as_(neu); raises(c, E.InsufficientPrivilege, "select public.request_loan(%s)", cp)
+    c.as_(None, "anon"); raises(c, E.InsufficientPrivilege, "select public.request_loan(%s)", cp)
+
+@test
+def kompletter_ablauf_inklusive_standortwechsel(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp)
+    call(c, owner, "respond_loan(%s, true)", loan)
+    assert status(c, loan) == "accepted"
+    # angenommen = nur reserviert: Standort bleibt beim Eigentümer
+    c.as_(other)
+    r = c.conn.execute("select holder_id, is_on_loan, is_reserved from public.copy_current_state where copy_id=%s", (cp,)).fetchone()
+    assert r == (owner, False, True), r
+    assert c.conn.execute("select count(*) from public.shelf_items(%s)", (bor,)).fetchone()[0] == 0
+    call(c, owner, "confirm_handover(%s)", loan)
+    c.as_(other)
+    r = c.conn.execute("select holder_id, is_on_loan, is_reserved from public.copy_current_state where copy_id=%s", (cp,)).fetchone()
+    assert r == (bor, True, False), r
+    bor_shelf = c.conn.execute("select title, owner_name, holder_name from public.shelf_items(%s)", (bor,)).fetchall()
+    own_shelf = c.conn.execute("select title, is_on_loan, holder_name from public.shelf_items(%s)", (owner,)).fetchall()
+    assert bor_shelf == [("Alpen", "Owner", "Bor")] and own_shelf == [("Alpen", True, "Bor")], (bor_shelf, own_shelf)
+    call(c, bor, "request_return(%s)", loan); assert status(c, loan) == "return_requested"
+    c.as_(other)
+    assert c.conn.execute("select is_on_loan from public.copy_current_state where copy_id=%s", (cp,)).fetchone()[0] is True
+    call(c, owner, "confirm_return(%s)", loan); assert status(c, loan) == "returned"
+    c.as_(other)
+    assert c.conn.execute("select holder_id, is_on_loan from public.copy_current_state where copy_id=%s", (cp,)).fetchone() == (owner, False)
+    assert c.conn.execute("select count(*) from public.shelf_items(%s)", (bor,)).fetchone()[0] == 0
+    types = [r[0] for r in c.sql("select type from public.notifications order by created_at, id").fetchall()]
+    assert sorted(types) == sorted(["loan_requested", "loan_accepted", "loan_handed_over", "loan_return_requested", "loan_returned"]), types
+    pages = dict(c.sql("select type, payload->>'page' from public.notifications").fetchall())
+    assert pages["loan_requested"] == "requests" and pages["loan_return_requested"] == "requests" and pages["loan_accepted"] == "mine" and pages["loan_returned"] == "mine", pages
+
+@test
+def nur_der_eigentuemer_darf_antworten_und_uebergabe_bestaetigen(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp)
+    for uid in (bor, other):
+        c.as_(uid); raises(c, E.InsufficientPrivilege, "select public.respond_loan(%s, true)", loan)
+    call(c, owner, "respond_loan(%s, true)", loan)
+    for uid in (bor, other):
+        c.as_(uid); raises(c, E.InsufficientPrivilege, "select public.confirm_handover(%s)", loan)
+    call(c, owner, "confirm_handover(%s)", loan)
+    for uid in (bor, other):
+        c.as_(uid); raises(c, E.InsufficientPrivilege, "select public.confirm_return(%s)", loan)
+
+@test
+def ungueltige_statuswechsel_werden_abgelehnt(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp)
+    c.as_(owner)
+    raises(c, E.RaiseException, "select public.confirm_handover(%s)", loan)       # noch nicht angenommen
+    raises(c, E.RaiseException, "select public.confirm_return(%s)", loan)
+    raises(c, E.RaiseException, "select public.request_return(%s)", loan)
+    call(c, owner, "respond_loan(%s, false)", loan); assert status(c, loan) == "declined"
+    c.as_(owner); raises(c, E.RaiseException, "select public.respond_loan(%s, true)", loan)   # nicht mehr offen
+    c.as_(bor); raises(c, E.RaiseException, "select public.cancel_loan(%s)", loan)            # abgelehnt: nichts mehr zu stornieren
+
+@test
+def zweite_zusage_fuer_dasselbe_exemplar_wird_verhindert(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    l1 = call(c, bor, "request_loan(%s)", cp); l2 = call(c, other, "request_loan(%s)", cp)
+    call(c, owner, "respond_loan(%s, true)", l1)
+    c.as_(owner)
+    raises(c, E.RaiseException, "select public.respond_loan(%s, true)", l2)
+    assert status(c, l2) == "requested"
+    # copy_busy meldet der Oberfläche, dass die zweite Anfrage warten muss
+    rows = c.conn.execute("select loan_id, copy_busy from public.my_loans() order by requested_at").fetchall()
+    assert rows == [(l1, False), (l2, True)] or sorted(rows, key=lambda r: str(r[0])) == sorted([(l1, False), (l2, True)], key=lambda r: str(r[0])), rows
+    # nach Rückgabe kann die zweite angenommen werden
+    call(c, owner, "confirm_handover(%s)", l1); call(c, owner, "confirm_return(%s)", l1)
+    call(c, owner, "respond_loan(%s, true)", l2); assert status(c, l2) == "accepted"
+
+@test
+def stornieren_durch_ausleihende_und_eigentuemer(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    l1 = call(c, bor, "request_loan(%s)", cp)
+    call(c, bor, "cancel_loan(%s)", l1); assert status(c, l1) == "cancelled"
+    l2 = call(c, bor, "request_loan(%s)", cp)
+    c.as_(owner); raises(c, E.InsufficientPrivilege, "select public.cancel_loan(%s)", l2)      # Anfrage: Eigentümer lehnt ab statt zu stornieren
+    call(c, owner, "respond_loan(%s, true)", l2)
+    c.as_(other); raises(c, E.InsufficientPrivilege, "select public.cancel_loan(%s)", l2)
+    call(c, owner, "cancel_loan(%s)", l2); assert status(c, l2) == "cancelled"
+    l3 = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, true)", l3); call(c, owner, "confirm_handover(%s)", l3)
+    c.as_(bor); raises(c, E.RaiseException, "select public.cancel_loan(%s)", l3)               # nach Übergabe nicht mehr
+
+@test
+def rueckgabe_durch_eigentuemer_direkt_und_nur_beteiligte_fragen_an(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, true)", loan); call(c, owner, "confirm_handover(%s)", loan)
+    c.as_(other); raises(c, E.InsufficientPrivilege, "select public.request_return(%s)", loan)
+    call(c, owner, "confirm_return(%s)", loan); assert status(c, loan) == "returned"      # ohne Anfrage der ausleihenden Person
+
+@test
+def admin_darf_haengende_ausleihen_abschliessen(c):
+    owner, bor, other, pz, cp = loan_setup(c); adm = c.user("Adm", role="admin")
+    loan = call(c, bor, "request_loan(%s)", cp)
+    call(c, adm, "respond_loan(%s, true)", loan); call(c, adm, "confirm_handover(%s)", loan); call(c, adm, "confirm_return(%s)", loan)
+    assert status(c, loan) == "returned"
+
+@test
+def ausleihen_sehen_nur_beteiligte_alle_nur_admin(c):
+    owner, bor, other, pz, cp = loan_setup(c); adm = c.user("Adm", role="admin")
+    call(c, bor, "request_loan(%s)", cp)
+    for uid, expected in [(owner, 1), (bor, 1), (other, 0)]:
+        c.as_(uid); assert c.conn.execute("select count(*) from public.my_loans()").fetchone()[0] == expected, uid
+    c.as_(other); raises(c, E.InsufficientPrivilege, "select * from public.my_loans(true)")
+    c.as_(adm); assert c.conn.execute("select count(*) from public.my_loans(true)").fetchone()[0] == 1
+    assert c.conn.execute("select count(*) from public.my_loans()").fetchone()[0] == 0
+
+@test
+def mitteilungen_gehen_an_die_richtige_person_und_koennen_gelesen_werden(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, true)", loan)
+    for uid, types in [(owner, ["loan_requested"]), (bor, ["loan_accepted"]), (other, [])]:
+        c.as_(uid)
+        assert [r[0] for r in c.conn.execute("select type from public.notifications").fetchall()] == types
+    c.as_(bor)
+    assert c.conn.execute("update public.notifications set read_at = now() where read_at is null").rowcount == 1
+    raises(c, E.InsufficientPrivilege, "update public.notifications set payload = '{}'::jsonb")
+
+@test
+def eigentumswechsel_mit_verlauf_und_schutz(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    c.as_(other); raises(c, E.InsufficientPrivilege, "select public.transfer_copy(%s, %s)", cp, other)
+    c.as_(owner)
+    raises(c, E.RaiseException, "select public.transfer_copy(%s, %s)", cp, owner)
+    pending = c.user("Pending", status="pending")
+    raises(c, E.RaiseException, "select public.transfer_copy(%s, %s)", cp, pending)
+    loan = call(c, bor, "request_loan(%s)", cp)
+    c.as_(owner); raises(c, E.RaiseException, "select public.transfer_copy(%s, %s)", cp, other)   # offene Anfrage
+    call(c, bor, "cancel_loan(%s)", loan)
+    call(c, owner, "transfer_copy(%s, %s)", cp, other)
+    assert c.sql("select owner_id from public.copies where id=%s", cp).fetchone()[0] == other
+    hist = c.sql("select from_owner_id, to_owner_id from public.ownership_history where copy_id=%s order by changed_at, id", cp).fetchall()
+    assert hist == [(None, owner), (owner, other)], hist
+    c.as_(other)
+    assert [r[0] for r in c.conn.execute("select type from public.notifications").fetchall()] == ["copy_transferred"]
+    c.as_(owner); raises(c, E.InsufficientPrivilege, "select public.transfer_copy(%s, %s)", cp, owner)   # nicht mehr Eigentümer
+
+@test
+def neues_exemplar_schreibt_eigentumsverlauf(c):
+    anna = c.user("Anna"); c.as_(anna)
+    pid = c.conn.execute("select public.add_puzzle('A', null, null, 100)").fetchone()[0]
+    assert c.conn.execute("select count(*) from public.ownership_history").fetchone()[0] == 1
+    raises(c, E.InsufficientPrivilege, "insert into public.ownership_history (copy_id, to_owner_id) select id, %s from public.copies", anna)
+
+@test
+def ausleihbar_umschalten_nur_eigentuemer(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    c.as_(owner); assert c.conn.execute("update public.copies set is_lendable=false where id=%s", (cp,)).rowcount == 1
+    c.as_(bor); assert c.conn.execute("update public.copies set is_lendable=true where id=%s", (cp,)).rowcount == 0
 
 if __name__ == "__main__":
     setup()

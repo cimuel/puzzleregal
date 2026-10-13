@@ -47,7 +47,7 @@ export interface ShelfRow {
   copy_id: string; puzzle_id: string; title: string; brand: string | null; product_no: string | null
   piece_count: number; image_path: string | null; owner_id: string; owner_name: string
   holder_id: string; holder_name: string; is_on_loan: boolean; is_lendable: boolean
-  best_seconds: number | null; attempts_count: number
+  best_seconds: number | null; attempts_count: number; is_reserved: boolean
 }
 export interface MemberRow {
   profile_id: string; display_name: string; copies_owned: number; copies_held: number
@@ -56,4 +56,15 @@ export interface MemberRow {
 export interface SimilarRow {
   puzzle_id: string; title: string; brand: string | null; product_no: string | null
   piece_count: number; image_path: string | null; reason: 'same_product_no' | 'similar_title'; score: number
+}
+
+export type LoanStatus = 'requested' | 'accepted' | 'lent' | 'return_requested' | 'returned' | 'declined' | 'cancelled'
+export interface LoanRow {
+  loan_id: string; copy_id: string; puzzle_id: string; title: string; brand: string | null; piece_count: number
+  image_path: string | null; owner_id: string; owner_name: string; borrower_id: string; borrower_name: string
+  status: LoanStatus; message: string | null; requested_at: string; accepted_at: string | null
+  handed_over_at: string | null; return_requested_at: string | null; returned_at: string | null; copy_busy: boolean
+}
+export interface NotificationRow {
+  id: string; type: string; payload: Record<string, string | null>; read_at: string | null; created_at: string
 }

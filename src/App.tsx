@@ -17,7 +17,9 @@ import { AttemptEdit } from './pages/AttemptEdit'
 import { Shelf } from './pages/Shelf'
 import { Shelves } from './pages/Shelves'
 import { Admin } from './pages/Admin'
-import { Placeholder } from './pages/Placeholder'
+import { LoanRequests } from './pages/LoanRequests'
+import { MyLoans } from './pages/MyLoans'
+import { Notifications } from './pages/Notifications'
 
 export default function App() {
   return (
@@ -41,8 +43,9 @@ export default function App() {
               <Route path="/mein-regal" element={<Shelf own />} />
               <Route path="/versuch-neu" element={<AttemptNew />} />
               <Route path="/versuch/:id/bearbeiten" element={<AttemptEdit />} />
-              <Route path="/ausleihen/anfragen" element={<Placeholder title="Ausleihanfragen" phase="Phase 4" />} />
-              <Route path="/ausleihen/meine" element={<Placeholder title="Eigene Ausleihen" phase="Phase 4" />} />
+              <Route path="/ausleihen/anfragen" element={<LoanRequests />} />
+              <Route path="/ausleihen/meine" element={<MyLoans />} />
+              <Route path="/mitteilungen" element={<Notifications />} />
               <Route path="/profil" element={<PlayerProfile own />} />
               <Route path="/person/:id" element={<PlayerProfile />} />
               <Route element={<RequireAdmin />}>

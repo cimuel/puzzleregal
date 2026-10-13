@@ -4,6 +4,9 @@ import { friendlyError } from '../lib/errors'
 import { generateInviteCode } from '../lib/inviteCode'
 import { useAuth, type Profile, type UserRole, type UserStatus } from '../auth/AuthContext'
 import { Button, Card, Field, Notice, Spinner } from '../components/ui'
+import { rpc, type LoanRow } from '../lib/api'
+import { LoanItem } from '../components/Loans'
+import { isActive } from '../lib/loans'
 
 interface InviteCode {
   id: string
@@ -28,7 +31,9 @@ export function Admin() {
   const [maxUses, setMaxUses] = useState('')
   const [newCode, setNewCode] = useState<string | null>(null)
 
+  const [loans, setLoans] = useState<LoanRow[] | null>(null)
   const load = useCallback(async () => {
+    rpc<LoanRow[]>('my_loans', { p_all: true }).then(setLoans).catch((e: unknown) => setMsg({ kind: 'error', text: e instanceof Error ? e.message : 'Fehler' }))
     const [u, c] = await Promise.all([
       supabase.from('profiles').select('id, display_name, role, status, created_at').order('created_at'),
       supabase.from('invite_codes').select('id, code, note, max_uses, uses, active, created_at').order('created_at', { ascending: false }),
@@ -124,6 +129,13 @@ export function Admin() {
             </li>
           ))}
         </ul>
+      </Card>
+
+      <Card>
+        <h2 className="mb-1 text-xl font-bold">Laufende Ausleihen ({(loans ?? []).filter((l) => isActive(l.status)).length})</h2>
+        <p className="mb-3 text-sm text-ink-soft">Als Admin kannst du hängende Ausleihen abschliessen, wenn sich die Beteiligten nicht melden.</p>
+        {(loans ?? []).filter((l) => isActive(l.status)).length === 0 ? <p className="text-ink-soft">Keine laufenden Ausleihen.</p> : (
+          <ul className="flex flex-col gap-3">{(loans ?? []).filter((l) => isActive(l.status)).map((l) => <LoanItem key={l.loan_id} loan={l} role="admin" onChange={load} />)}</ul>)}
       </Card>
 
       <Card>

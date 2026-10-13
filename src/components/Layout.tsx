@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Button, Logo } from './ui'
+import { useUnread } from '../hooks/useUnread'
 
 const nav = [
   { to: '/start', label: 'Start' },
   { to: '/puzzles', label: 'Alle Puzzles' },
   { to: '/regale', label: 'Alle Regale' },
   { to: '/mein-regal', label: 'Mein Regal' },
+  { to: '/mitteilungen', label: 'Mitteilungen' },
   { to: '/ausleihen/anfragen', label: 'Ausleihanfragen' },
   { to: '/ausleihen/meine', label: 'Eigene Ausleihen' },
   { to: '/puzzle-neu', label: 'Neues Puzzle erfassen' },
@@ -22,12 +24,15 @@ export function Layout() {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const location = useLocation()
+  const unread = useUnread(location.pathname)
 
   const links = (
     <nav aria-label="Hauptnavigation" className="flex flex-col gap-1">
       {nav.map((n) => (
         <NavLink key={n.to} to={n.to} className={linkClass} onClick={() => setOpen(false)}>
           {n.label}
+          {n.to === '/mitteilungen' && unread > 0 && <span className="ml-2 rounded-full bg-mustard px-2 py-0.5 text-sm font-semibold text-ink" aria-label={`${unread} ungelesen`}>{unread}</span>}
         </NavLink>
       ))}
       {profile?.role === 'admin' && (

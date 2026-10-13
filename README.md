@@ -2,12 +2,14 @@
 
 Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzle-Community.
 
-**Stand: Phase 3 von 6** (Kernfunktionen).
+**Stand: Phase 4 von 6** (Ausleihsystem).
 - Phase 2: Registrierung mit Einladungscode, Admin-Freigabe, Anmeldung, Berechtigungen, Adminbereich.
 - Phase 3: Puzzles erfassen (mit Foto, Doppelt-Erkennung, optional Meisterschaft), Alle Puzzles (Suche, Filter, Sortierung),
   Puzzle-Detailseite mit Rangliste, Regale (Karten, umschaltbare Sortierung), Zeiterfassung (Einzel, Paar, Team),
   Personenprofil mit Statistiken und Verlauf.
-- **Noch nicht gebaut:** Ausleihen (Phase 4), Wettkampfimport und Rangschätzung (Phase 5).
+- Phase 4: Ausleihen (anfragen, annehmen oder ablehnen, Übergabe, Rückgabe), Verlauf, Mitteilungen in der App,
+  Eigentumswechsel, Schalter «zum Ausleihen freigegeben».
+- **Noch nicht gebaut:** Wettkampfimport und Rangschätzung (Phase 5), E-Mail-Benachrichtigungen (optional, später).
 
 ## Aufbau
 
@@ -52,7 +54,16 @@ Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzl
 2. Reiter **Actions**: Der Lauf «Veröffentlichen (GitHub Pages)» startet bei jedem Commit auf `main`.
    Grün = veröffentlicht. Adresse: `https://cimuel.github.io/puzzleregal/`
 
-## Update auf Phase 3 einspielen (wenn Phase 2 schon läuft)
+## Update auf Phase 4 einspielen (wenn Phase 3 schon läuft)
+
+**Reihenfolge einhalten: zuerst die Datenbank, dann der Code.**
+1. Supabase, **SQL Editor**, **New query**: Inhalt von `supabase/migrations/0004_phase4_ausleihe.sql` einfügen, **Run**.
+   Erwartet: «Success». Nur **einmal** ausführen.
+2. GitHub: den **gesamten** Inhalt des entpackten Ordners nochmals hochladen (Upload files, Commit).
+   Es fällt keine Datei weg, nichts muss gelöscht werden.
+3. Reiter **Actions**: warten, bis der Lauf grün ist. Seite mit Strg + F5 neu laden.
+
+## Update auf Phase 3 einspielen (nur wenn noch von Phase 2 aus gestartet wird)
 
 **Reihenfolge einhalten: zuerst die Datenbank, dann der Code.**
 1. Supabase, **SQL Editor**, **New query**: Inhalt von `supabase/migrations/0003_phase3_kernfunktionen.sql` einfügen, **Run**.
@@ -89,3 +100,14 @@ Wartende und gesperrte Konten sehen keine Puzzles, Zeiten oder Profile anderer.
 - **Geschwindigkeit eines Versuchs:** Teile ÷ Minuten dieses einen Versuchs. Teile pro Stunde = Teile pro Minute × 60.
 - **Rang:** gleiche Zeit ergibt gleichen Rang, danach wird übersprungen (1, 2, 2, 4).
 - **Persönliche Statistiken** zählen standardmässig nur **Einzelversuche**. Paar- und Teamzeiten sind getrennt wählbar.
+
+## Ausleihe: Ablauf und Regeln
+1. **Anfragen:** Jedes Mitglied kann bei einem fremden, zum Ausleihen freigegebenen Exemplar «Ausleihe anfragen» wählen (mit optionaler Nachricht).
+2. **Annehmen oder ablehnen:** nur die Besitzerin oder der Besitzer. Angenommen heisst: **reserviert**. Das Puzzle bleibt noch im Regal der Besitzerin.
+3. **Übergabe bestätigen:** nur die Besitzerin oder der Besitzer. Erst dann steht das Puzzle im Regal der ausleihenden Person und ist beim Eigentümer als ausgeliehen markiert.
+4. **Rückgabe:** Die ausleihende Person kann «Rückgabe melden», die Besitzerin «Rückgabe anfragen». Zurückgegeben ist es erst, wenn die **Besitzerin oder der Besitzer die Rückgabe bestätigt**.
+5. Dasselbe Exemplar kann nie gleichzeitig an mehrere Personen vergeben sein (Sperre in der Datenbank). Weitere Anfragen bleiben offen und lassen sich annehmen, sobald das Puzzle zurück ist.
+6. **Zurückziehen:** Anfragen und angenommene Ausleihen vor der Übergabe kann die ausleihende Person zurückziehen. Angenommene kann auch die Besitzerin stornieren.
+7. **Admins** können hängende Ausleihen im Adminbereich abschliessen.
+8. **Eigentumswechsel:** nur durch die Besitzerin, nie bei offenen Anfragen oder laufender Ausleihe. Der Verlauf wird gespeichert.
+9. Mitteilungen erscheinen in der App (Menü «Mitteilungen» mit Zähler). Es werden keine E-Mails verschickt.

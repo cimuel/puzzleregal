@@ -10,7 +10,7 @@ const mock = vi.hoisted(() => ({ tables: {} as Record<string, { rows?: unknown[]
 vi.mock('../lib/supabase', () => {
   const builder = (table: string) => {
     const b: Record<string, unknown> = {}
-    for (const m of ['select', 'eq', 'order', 'insert', 'update', 'delete']) b[m] = () => b
+    for (const m of ['select', 'eq', 'order', 'insert', 'update', 'delete', 'is', 'in', 'limit']) b[m] = () => b
     b.maybeSingle = () => Promise.resolve({ data: mock.tables[table]?.single ?? null, error: null })
     b.then = (res: (v: unknown) => unknown) => res({ data: mock.tables[table]?.rows ?? [], error: null })
     return b
@@ -34,6 +34,9 @@ import { PlayerProfile } from './PlayerProfile'
 import { AttemptNew } from './AttemptNew'
 import { PuzzleNew } from './PuzzleNew'
 import { Shelves } from './Shelves'
+import { LoanRequests } from './LoanRequests'
+import { MyLoans } from './MyLoans'
+import { Notifications } from './Notifications'
 
 const wrap = (path: string, pattern: string, el: React.ReactElement) =>
   render(<MemoryRouter initialEntries={[path]}><Routes><Route path={pattern} element={el} /></Routes></MemoryRouter>)
@@ -156,5 +159,91 @@ describe('Seiten (Rauchtest)', () => {
   it('Regalübersicht listet Mitglieder', async () => {
     wrap('/regale', '/regale', <Shelves />)
     expect(await screen.findByRole('heading', { name: 'Anna' })).toBeTruthy()
+  })
+})
+
+const loan = (o: Record<string, unknown>) => ({
+  loan_id: 'l1', copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: 'Ravensburger', piece_count: 1000, image_path: null,
+  owner_id: 'me', owner_name: 'Anna', borrower_id: 'bea', borrower_name: 'Bea', status: 'requested', message: null,
+  requested_at: '2026-10-01T10:00:00Z', accepted_at: null, handed_over_at: null, return_requested_at: null, returned_at: null, copy_busy: false, ...o,
+})
+
+describe('Ausleihe (Rauchtest)', () => {
+  it('fremdes Regal: «Ausleihe anfragen» sendet Exemplar und Nachricht', async () => {
+    mock.rpc.shelf_items = [{ copy_id: 'c9', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null, owner_id: 'bea', owner_name: 'Bea', holder_id: 'bea', holder_name: 'Bea', is_on_loan: false, is_reserved: false, is_lendable: true, best_seconds: null, attempts_count: 0 }]
+    wrap('/regal/bea', '/regal/:id', <Shelf />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ausleihe anfragen' }))
+    await userEvent.type(screen.getByLabelText(/Nachricht/), 'Für zwei Wochen?')
+    await userEvent.click(screen.getByRole('button', { name: 'Anfrage senden' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'request_loan')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'request_loan')!.args).toEqual({ p_copy: 'c9', p_message: 'Für zwei Wochen?' })
+  })
+
+  it('fremdes Regal: nicht freigegebene Puzzles haben keine Anfrage-Schaltfläche', async () => {
+    mock.rpc.shelf_items = [{ copy_id: 'c9', puzzle_id: 'p1', title: 'Geschlossen', brand: null, product_no: null, piece_count: 500, image_path: null, owner_id: 'bea', owner_name: 'Bea', holder_id: 'bea', holder_name: 'Bea', is_on_loan: false, is_reserved: false, is_lendable: false, best_seconds: null, attempts_count: 0 }]
+    wrap('/regal/bea', '/regal/:id', <Shelf />)
+    await screen.findByText('Geschlossen')
+    expect(screen.queryByRole('button', { name: 'Ausleihe anfragen' })).toBeNull()
+    expect(screen.getByText('Nicht zum Ausleihen freigegeben.')).toBeTruthy()
+  })
+
+  it('fremdes Regal: eigene offene Anfrage zeigt den Stand statt der Schaltfläche', async () => {
+    mock.rpc.shelf_items = [{ copy_id: 'c9', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null, owner_id: 'bea', owner_name: 'Bea', holder_id: 'bea', holder_name: 'Bea', is_on_loan: false, is_reserved: false, is_lendable: true, best_seconds: null, attempts_count: 0 }]
+    mock.rpc.my_loans = [loan({ loan_id: 'l7', copy_id: 'c9', owner_id: 'bea', owner_name: 'Bea', borrower_id: 'me', borrower_name: 'Anna', status: 'accepted' })]
+    wrap('/regal/bea', '/regal/:id', <Shelf />)
+    expect(await screen.findByText('angenommen')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Ausleihe anfragen' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Zurückziehen' })).toBeTruthy()
+  })
+
+  it('eigenes Regal: Freigabe-Schalter und reserviertes Puzzle', async () => {
+    mock.rpc.shelf_items = [{ copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null, owner_id: 'me', owner_name: 'Anna', holder_id: 'me', holder_name: 'Anna', is_on_loan: false, is_reserved: true, is_lendable: true, best_seconds: null, attempts_count: 0 }]
+    wrap('/mein-regal', '/mein-regal', <Shelf own />)
+    expect(await screen.findByLabelText('Zum Ausleihen freigegeben')).toBeTruthy()
+    expect(screen.getByText('reserviert')).toBeTruthy()
+    expect(screen.getByText(/Nicht möglich, solange das Puzzle reserviert/)).toBeTruthy()
+  })
+
+  it('Ausleihanfragen: Annehmen sendet die Zusage, bei vergebenem Puzzle ist sie gesperrt', async () => {
+    mock.rpc.my_loans = [loan({}), loan({ loan_id: 'l2', borrower_id: 'cor', borrower_name: 'Cor', copy_busy: true, title: 'Katzen' })]
+    wrap('/ausleihen/anfragen', '/ausleihen/anfragen', <LoanRequests />)
+    await screen.findByText('Offene Anfragen (2)')
+    const buttons = screen.getAllByRole('button', { name: 'Annehmen' }) as HTMLButtonElement[]
+    expect(buttons[0].disabled).toBe(false)
+    expect(buttons[1].disabled).toBe(true)
+    expect(screen.getByText('Bereits an jemand anderen vergeben.')).toBeTruthy()
+    await userEvent.click(buttons[0])
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'respond_loan')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'respond_loan')!.args).toEqual({ p_loan: 'l1', p_accept: true })
+  })
+
+  it('Ausleihanfragen: angenommen → Übergabe bestätigen, ausgeliehen → Rückgabe bestätigen', async () => {
+    mock.rpc.my_loans = [loan({ status: 'accepted' }), loan({ loan_id: 'l3', status: 'return_requested', title: 'Katzen' })]
+    wrap('/ausleihen/anfragen', '/ausleihen/anfragen', <LoanRequests />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Übergabe bestätigen' }))
+    await waitFor(() => expect(mock.calls.some((c) => c.fn === 'confirm_handover')).toBe(true))
+    expect(screen.getByRole('button', { name: 'Rückgabe bestätigen' })).toBeTruthy()
+  })
+
+  it('Eigene Ausleihen: zeigt Standort der eigenen Puzzles, Rückgabe melden und Verlauf', async () => {
+    mock.rpc.shelf_items = [{ copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null, owner_id: 'me', owner_name: 'Anna', holder_id: 'bea', holder_name: 'Bea', is_on_loan: true, is_reserved: false, is_lendable: true, best_seconds: null, attempts_count: 0 }]
+    mock.rpc.my_loans = [
+      loan({ loan_id: 'l5', owner_id: 'cor', owner_name: 'Cor', borrower_id: 'me', borrower_name: 'Anna', status: 'lent', title: 'Katzen' }),
+      loan({ loan_id: 'l6', status: 'returned', returned_at: '2026-09-01T10:00:00Z' }),
+    ]
+    wrap('/ausleihen/meine', '/ausleihen/meine', <MyLoans />)
+    expect(await screen.findByText('bei Bea')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Rückgabe melden' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'request_return')).toBeTruthy())
+    expect(screen.getByText('Verlauf (1)')).toBeTruthy()
+    expect(screen.getByText('zurückgegeben')).toBeTruthy()
+  })
+
+  it('Mitteilungen: zeigt Text und Ungelesen-Markierung', async () => {
+    mock.tables.notifications = { rows: [{ id: 'n1', type: 'loan_requested', payload: { borrower_name: 'Bea', puzzle_title: 'Alpen', page: 'requests' }, read_at: null, created_at: '2026-10-01T10:00:00Z' }] }
+    wrap('/mitteilungen', '/mitteilungen', <Notifications />)
+    expect(await screen.findByText('Bea möchte «Alpen» ausleihen.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Alle als gelesen markieren' })).toBeTruthy()
+    expect((screen.getByRole('link', { name: 'Öffnen' }) as HTMLAnchorElement).getAttribute('href')).toBe('/ausleihen/anfragen')
   })
 })

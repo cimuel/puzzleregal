@@ -1,4 +1,4 @@
-# Architektur und Entscheide (Stand Phase 3)
+# Architektur und Entscheide (Stand Phase 4)
 
 | Thema | Entscheid | Grund |
 |---|---|---|
@@ -22,7 +22,17 @@
 | Teamzeiten | getrennte Ranglisten, nicht in Einzelstatistiken | Teamzeit ist keine persönliche Leistung |
 | Fotos | im Browser auf max. 1280 px und WebP verkleinert | bleibt unter 1 MB, spart Speicher |
 
+| Ausleihe | Statuswechsel nur über Datenbankfunktionen (`request_loan`, `respond_loan`, `confirm_handover`, `request_return`, `confirm_return`, `cancel_loan`) | Berechtigungen und gültige Übergänge serverseitig |
+| Standort | `angenommen` reserviert nur, der Standort wechselt erst bei `ausgeliehen` | entspricht der Anforderung «nach bestätigter Übergabe» |
+| Übergabe/Rückgabe bestätigt | die Besitzerin oder der Besitzer (Annahme, nicht von dir vorgegeben) | eine Person entscheidet eindeutig; Admin kann einspringen |
+| Mehrere Anfragen | bleiben offen, Annahme nur wenn nicht vergeben | nichts geht verloren, wenn eine Ausleihe platzt |
+| Mitteilungen | Tabelle `notifications`, von Datenbankfunktionen geschrieben | kein E-Mail-Dienst nötig |
+| Eigentum | `transfer_copy` mit Verlauf in `ownership_history` | Eigentum und Standort bleiben getrennt nachvollziehbar |
+
 ## Bekannte Lücken (bewusst offen)
+- Keine E-Mail-Benachrichtigung: Mitteilungen sieht man nur in der App (Zähler im Menü, Aktualisierung beim Öffnen, bei Fokus und jede Minute).
+- Es gibt keine Erinnerung bei überfälligen Ausleihen und kein Rückgabedatum.
+- Wer eine Ausleihe stornieren will, nachdem das Puzzle übergeben wurde, muss die Rückgabe durchlaufen.
 - Mitglieder können beim Erfassen eines Puzzles Veranstaltungen und Runden neu anlegen (finden oder anlegen). Es gibt noch
   keine Oberfläche, um falsche Einträge zu löschen (Admin vorerst per SQL). Kommt mit Phase 5.
 - Puzzles können in der Oberfläche nicht gelöscht werden (nur Admin per SQL; Exemplare und Versuche blockieren es bewusst).
