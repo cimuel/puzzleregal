@@ -12,7 +12,7 @@ import { Chip, ErrorBox, PuzzleImage } from '../components/Parts'
 import { RequestLoan } from '../components/Loans'
 import { useMyLoans } from '../hooks/useMyLoans'
 
-interface CopyRow { id: string; owner_id: string; is_lendable: boolean; holder_id: string; is_on_loan: boolean; is_reserved: boolean }
+interface CopyRow { id: string; owner_id: string; is_lendable: boolean; holder_id: string; is_on_loan: boolean; is_reserved: boolean; guest_name: string | null; is_with_guest: boolean }
 interface RoundRow { id: string; name: string; team_size: number; results_url: string | null; events: { name: string; year: number } | null }
 
 const teamLabel = (n: number) => (n === 1 ? 'Einzel' : n === 2 ? 'Paar' : `Team (${n})`)
@@ -38,11 +38,11 @@ export function PuzzleDetail() {
   const copies = useAsync(async () => {
     const [c, s] = await Promise.all([
       supabase.from('copies').select('id, owner_id, is_lendable').eq('puzzle_id', id),
-      supabase.from('copy_current_state').select('copy_id, holder_id, is_on_loan, is_reserved').eq('puzzle_id', id),
+      supabase.from('copy_current_state').select('copy_id, holder_id, is_on_loan, is_reserved, is_with_guest, guest_name').eq('puzzle_id', id),
     ])
     if (c.error || s.error) throw new Error(friendlyError((c.error ?? s.error)?.message))
     const state = new Map((s.data ?? []).map((x) => [x.copy_id as string, x]))
-    return (c.data ?? []).map((x) => ({ ...x, holder_id: state.get(x.id)?.holder_id ?? x.owner_id, is_on_loan: !!state.get(x.id)?.is_on_loan, is_reserved: !!state.get(x.id)?.is_reserved })) as CopyRow[]
+    return (c.data ?? []).map((x) => ({ ...x, holder_id: state.get(x.id)?.holder_id ?? x.owner_id, is_on_loan: !!state.get(x.id)?.is_on_loan, is_reserved: !!state.get(x.id)?.is_reserved, is_with_guest: !!state.get(x.id)?.is_with_guest, guest_name: (state.get(x.id)?.guest_name as string | null) ?? null })) as CopyRow[]
   }, [id])
   const rounds = useAsync(async () => {
     const { data, error } = await supabase.from('rounds').select('id, name, team_size, results_url, events(name, year)').eq('puzzle_id', id)
@@ -119,8 +119,8 @@ export function PuzzleDetail() {
             <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span><Link className="font-semibold text-teal-dark underline" to={`/regal/${c.owner_id}`}>{members.names.get(c.owner_id) ?? '…'}</Link>
                 {c.is_on_loan && <span className="text-ink-soft"> · gerade bei {members.names.get(c.holder_id) ?? '…'}</span>}</span>
-              <span className="flex flex-wrap items-center gap-2">{c.is_on_loan ? <Chip tone="warn">ausgeliehen</Chip> : c.is_reserved ? <Chip tone="warn">reserviert</Chip> : <Chip tone="good">zu Hause</Chip>}{c.is_lendable ? <Chip>ausleihbar</Chip> : <Chip>nicht ausleihbar</Chip>}
-                {c.owner_id !== profile?.id && c.is_lendable && <RequestLoan copyId={c.id} mine={loans.myActiveByCopy.get(c.id)} onDone={() => { copies.reload(); loans.reload() }} />}</span>
+              <span className="flex flex-wrap items-center gap-2">{c.is_with_guest ? <Chip tone="warn">bei Gast{c.guest_name ? ` (${c.guest_name})` : ''}</Chip> : c.is_on_loan ? <Chip tone="warn">ausgeliehen</Chip> : c.is_reserved ? <Chip tone="warn">reserviert</Chip> : <Chip tone="good">zu Hause</Chip>}{c.is_lendable ? <Chip>ausleihbar</Chip> : <Chip>nicht ausleihbar</Chip>}
+                {c.owner_id !== profile?.id && c.is_lendable && !c.is_with_guest && <RequestLoan copyId={c.id} mine={loans.myActiveByCopy.get(c.id)} onDone={() => { copies.reload(); loans.reload() }} />}</span>
             </li>
           ))}
         </ul>

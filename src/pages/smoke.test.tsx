@@ -37,6 +37,7 @@ import { Shelves } from './Shelves'
 import { LoanRequests } from './LoanRequests'
 import { MyLoans } from './MyLoans'
 import { Notifications } from './Notifications'
+import { GuestShelf } from './GuestShelf'
 
 const wrap = (path: string, pattern: string, el: React.ReactElement) =>
   render(<MemoryRouter initialEntries={[path]}><Routes><Route path={pattern} element={el} /></Routes></MemoryRouter>)
@@ -69,6 +70,7 @@ beforeEach(() => {
       { attempt_id: 'a1', solved_on: '2026-01-01', duration_seconds: 600, piece_count: 100, puzzle_id: 'p2', title: 'Klein', kind: 'training', team_size: 1, ppm: '10.00' },
       { attempt_id: 'a2', solved_on: '2026-05-01', duration_seconds: 3000, piece_count: 1000, puzzle_id: 'p1', title: 'Alpenpanorama', kind: 'official', team_size: 1, ppm: '20.00' },
     ],
+    guest_items: [],
     member_overview: [{ profile_id: 'me', display_name: 'Anna', copies_owned: 2, copies_held: 2, solved_puzzles: 2, attempts_count: 2 }],
     find_similar_puzzles: [],
     add_puzzle: 'p9',
@@ -201,7 +203,7 @@ describe('Ausleihe (Rauchtest)', () => {
     wrap('/mein-regal', '/mein-regal', <Shelf own />)
     expect(await screen.findByLabelText('Zum Ausleihen freigegeben')).toBeTruthy()
     expect(screen.getByText('reserviert')).toBeTruthy()
-    expect(screen.getByText(/Nicht möglich, solange das Puzzle reserviert/)).toBeTruthy()
+    expect(screen.getAllByText(/Nicht möglich, solange das Puzzle reserviert/).length).toBeGreaterThan(0)
   })
 
   it('Ausleihanfragen: Annehmen sendet die Zusage, bei vergebenem Puzzle ist sie gesperrt', async () => {
@@ -245,5 +247,65 @@ describe('Ausleihe (Rauchtest)', () => {
     expect(await screen.findByText('Bea möchte «Alpen» ausleihen.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Alle als gelesen markieren' })).toBeTruthy()
     expect((screen.getByRole('link', { name: 'Öffnen' }) as HTMLAnchorElement).getAttribute('href')).toBe('/ausleihen/anfragen')
+  })
+})
+
+const shelfRow = (o: Record<string, unknown>) => ({ copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null,
+  owner_id: 'me', owner_name: 'Anna', holder_id: 'me', holder_name: 'Anna', is_on_loan: false, is_reserved: false, is_lendable: true, best_seconds: null, attempts_count: 0,
+  is_with_guest: false, guest_name: null, guest_since: null, ...o })
+
+describe('Gästeregal (Rauchtest)', () => {
+  it('eigenes Regal: Puzzle an einen Gast eintragen sendet Exemplar und Name', async () => {
+    mock.rpc.shelf_items = [shelfRow({})]
+    wrap('/mein-regal', '/mein-regal', <Shelf own />)
+    await screen.findByText('Alpenpanorama')
+    await userEvent.click(screen.getByText('An einen Gast ohne Konto ausgeliehen'))
+    await userEvent.type(screen.getByLabelText('Name des Gastes (optional)'), 'Michael')
+    await userEvent.click(screen.getByRole('button', { name: 'Eintragen' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'lend_to_guest')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'lend_to_guest')!.args).toEqual({ p_copy: 'c1', p_guest_name: 'Michael' })
+  })
+
+  it('eigenes Regal: ohne Namen wird kein Name gesendet', async () => {
+    mock.rpc.shelf_items = [shelfRow({})]
+    wrap('/mein-regal', '/mein-regal', <Shelf own />)
+    await screen.findByText('Alpenpanorama')
+    await userEvent.click(screen.getByText('An einen Gast ohne Konto ausgeliehen'))
+    await userEvent.click(screen.getByRole('button', { name: 'Eintragen' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'lend_to_guest')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'lend_to_guest')!.args).toEqual({ p_copy: 'c1', p_guest_name: null })
+  })
+
+  it('eigenes Regal: Puzzle bei Gast zeigt den Namen und lässt sich zurückmelden', async () => {
+    mock.rpc.shelf_items = [shelfRow({ is_with_guest: true, guest_name: 'Michael', guest_since: '2026-10-01T10:00:00Z' })]
+    wrap('/mein-regal', '/mein-regal', <Shelf own />)
+    expect(await screen.findByText('bei Gast (Michael)')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Vom Gast zurück erhalten' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'return_from_guest')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'return_from_guest')!.args).toEqual({ p_copy: 'c1' })
+  })
+
+  it('fremdes Regal: Puzzle bei Gast hat keine Anfrage-Schaltfläche und sagt warum', async () => {
+    mock.rpc.shelf_items = [shelfRow({ owner_id: 'bea', owner_name: 'Bea', holder_id: 'bea', holder_name: 'Bea', is_with_guest: true, guest_name: 'Michael' })]
+    wrap('/regal/bea', '/regal/:id', <Shelf />)
+    expect(await screen.findByText(/Gerade bei einem Gast \(Michael\)/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Ausleihe anfragen' })).toBeNull()
+  })
+
+  it('Gästeregal-Seite listet Puzzles mit Besitzer und Gast, nur der Besitzer sieht «zurück erhalten»', async () => {
+    mock.rpc.guest_items = [
+      { copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, piece_count: 1000, image_path: null, owner_id: 'me', owner_name: 'Anna', guest_name: 'Michael', guest_since: '2026-10-01T10:00:00Z' },
+      { copy_id: 'c2', puzzle_id: 'p2', title: 'Katzen im Garten', brand: null, piece_count: 500, image_path: null, owner_id: 'bea', owner_name: 'Bea', guest_name: null, guest_since: '2026-10-02T10:00:00Z' },
+    ]
+    wrap('/gaesteregal', '/gaesteregal', <GuestShelf />)
+    expect(await screen.findByText('Michael')).toBeTruthy()
+    expect(screen.getByText('einem Gast')).toBeTruthy()           // ohne Namen
+    expect(screen.getAllByText('nicht ausleihbar')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Vom Gast zurück erhalten' })).toHaveLength(1)
+  })
+
+  it('Gästeregal-Seite: leer zeigt einen verständlichen Hinweis', async () => {
+    wrap('/gaesteregal', '/gaesteregal', <GuestShelf />)
+    expect(await screen.findByText('Gerade ist kein Puzzle bei einem Gast.')).toBeTruthy()
   })
 })

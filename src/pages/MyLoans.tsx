@@ -31,7 +31,7 @@ export function MyLoans() {
           <ul className="divide-y divide-line">{mineCopies.map((r) => (
             <li key={r.copy_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <Link className="font-semibold text-teal-dark underline" to={`/puzzle/${r.puzzle_id}`}>{r.title}</Link>
-              {r.is_on_loan ? <Chip tone="warn">bei {r.holder_name}</Chip> : r.is_reserved ? <Chip tone="warn">reserviert, Übergabe offen</Chip> : <Chip tone="good">zu Hause</Chip>}
+              {r.is_with_guest ? <Chip tone="warn">bei Gast{r.guest_name ? ` (${r.guest_name})` : ''}</Chip> : r.is_on_loan ? <Chip tone="warn">bei {r.holder_name}</Chip> : r.is_reserved ? <Chip tone="warn">reserviert, Übergabe offen</Chip> : <Chip tone="good">zu Hause</Chip>}
             </li>))}</ul>)}
       </Card>
 

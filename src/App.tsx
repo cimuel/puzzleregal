@@ -20,6 +20,7 @@ import { Admin } from './pages/Admin'
 import { LoanRequests } from './pages/LoanRequests'
 import { MyLoans } from './pages/MyLoans'
 import { Notifications } from './pages/Notifications'
+import { GuestShelf } from './pages/GuestShelf'
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/ausleihen/anfragen" element={<LoanRequests />} />
               <Route path="/ausleihen/meine" element={<MyLoans />} />
               <Route path="/mitteilungen" element={<Notifications />} />
+              <Route path="/gaesteregal" element={<GuestShelf />} />
               <Route path="/profil" element={<PlayerProfile own />} />
               <Route path="/person/:id" element={<PlayerProfile />} />
               <Route element={<RequireAdmin />}>

@@ -48,6 +48,7 @@ export interface ShelfRow {
   piece_count: number; image_path: string | null; owner_id: string; owner_name: string
   holder_id: string; holder_name: string; is_on_loan: boolean; is_lendable: boolean
   best_seconds: number | null; attempts_count: number; is_reserved: boolean
+  is_with_guest: boolean; guest_name: string | null; guest_since: string | null
 }
 export interface MemberRow {
   profile_id: string; display_name: string; copies_owned: number; copies_held: number
@@ -67,4 +68,9 @@ export interface LoanRow {
 }
 export interface NotificationRow {
   id: string; type: string; payload: Record<string, string | null>; read_at: string | null; created_at: string
+}
+
+export interface GuestItem {
+  copy_id: string; puzzle_id: string; title: string; brand: string | null; piece_count: number
+  image_path: string | null; owner_id: string; owner_name: string; guest_name: string | null; guest_since: string
 }

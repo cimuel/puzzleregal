@@ -19,7 +19,7 @@ def setup():
         conn.execute("drop schema if exists public cascade; create schema public;")
         conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -784,7 +784,7 @@ def eigentumswechsel_mit_verlauf_und_schutz(c):
     call(c, bor, "cancel_loan(%s)", loan)
     call(c, owner, "transfer_copy(%s, %s)", cp, other)
     assert c.sql("select owner_id from public.copies where id=%s", cp).fetchone()[0] == other
-    hist = c.sql("select from_owner_id, to_owner_id from public.ownership_history where copy_id=%s order by changed_at, id", cp).fetchall()
+    hist = c.sql("select from_owner_id, to_owner_id from public.ownership_history where copy_id=%s order by from_owner_id nulls first", cp).fetchall()
     assert hist == [(None, owner), (owner, other)], hist
     c.as_(other)
     assert [r[0] for r in c.conn.execute("select type from public.notifications").fetchall()] == ["copy_transferred"]
@@ -802,6 +802,99 @@ def ausleihbar_umschalten_nur_eigentuemer(c):
     owner, bor, other, pz, cp = loan_setup(c)
     c.as_(owner); assert c.conn.execute("update public.copies set is_lendable=false where id=%s", (cp,)).rowcount == 1
     c.as_(bor); assert c.conn.execute("update public.copies set is_lendable=true where id=%s", (cp,)).rowcount == 0
+
+@test
+def sensible_spalten_sind_per_spaltenrecht_gesperrt(c):
+    """Prüft die Rechte direkt (nicht über Zeilenregeln): Diese Spalten darf kein Mitglied selbst schreiben."""
+    def can(col_table, col, priv):
+        return c.sql("select has_column_privilege('authenticated', %s, %s, %s)", col_table, col, priv).fetchone()[0]
+    forbidden_update = [("public.profiles", "role"), ("public.profiles", "status"), ("public.profiles", "id"),
+                        ("public.copies", "owner_id"), ("public.copies", "guest_name"), ("public.copies", "guest_since"), ("public.copies", "puzzle_id"),
+                        ("public.puzzles", "created_by"), ("public.attempts", "team_size"), ("public.attempts", "puzzle_id"),
+                        ("public.attempts", "created_by"), ("public.attempts", "round_id"),
+                        ("public.loans", "status"), ("public.loans", "borrower_id"), ("public.loans", "copy_id"),
+                        ("public.notifications", "payload"), ("public.notifications", "user_id")]
+    for tbl, col in forbidden_update:
+        assert not can(tbl, col, "UPDATE"), f"{tbl}.{col} darf nicht aktualisierbar sein"
+    for tbl, col in [("public.copies", "guest_since"), ("public.puzzles", "created_by"), ("public.loans", "status"),
+                     ("public.attempts", "duration_seconds"), ("public.profiles", "role")]:
+        assert not can(tbl, col, "INSERT"), f"{tbl}.{col} darf nicht direkt einfügbar sein"
+    for tbl, col in [("public.copies", "is_lendable"), ("public.copies", "note"), ("public.profiles", "display_name"),
+                     ("public.attempts", "duration_seconds"), ("public.puzzles", "title"), ("public.notifications", "read_at")]:
+        assert can(tbl, col, "UPDATE"), f"{tbl}.{col} muss aktualisierbar sein"
+    assert can("public.copies", "owner_id", "INSERT") and can("public.copies", "puzzle_id", "INSERT")
+
+# ---------------- Gästeregal: Puzzles bei Gästen ohne Konto ----------------
+@test
+def an_gast_ausleihen_zeigt_standort_regal_und_gaesteregal(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    call(c, owner, "lend_to_guest(%s, ' Michael ')", cp)
+    c.as_(other)
+    r = c.conn.execute("select holder_id, is_with_guest, guest_name from public.copy_current_state where copy_id=%s", (cp,)).fetchone()
+    assert r == (owner, True, "Michael"), r          # bleibt Eigentum des Besitzers, aber bei einem Gast
+    s = c.conn.execute("select title, is_with_guest, guest_name from public.shelf_items(%s)", (owner,)).fetchall()
+    assert s == [("Alpen", True, "Michael")], s
+    g = c.conn.execute("select title, owner_name, guest_name from public.guest_items()").fetchall()
+    assert g == [("Alpen", "Owner", "Michael")], g
+    call(c, owner, "return_from_guest(%s)", cp)
+    c.as_(other)
+    assert c.conn.execute("select count(*) from public.guest_items()").fetchone()[0] == 0
+    assert c.conn.execute("select is_with_guest, guest_name from public.copy_current_state where copy_id=%s", (cp,)).fetchone() == (False, None)
+
+@test
+def gast_ohne_namen_ist_erlaubt(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    call(c, owner, "lend_to_guest(%s)", cp)
+    c.as_(other)
+    assert c.conn.execute("select guest_name from public.guest_items()").fetchall() == [(None,)]
+
+@test
+def anfrage_fuer_puzzle_bei_gast_ist_nicht_moeglich(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    call(c, owner, "lend_to_guest(%s, 'Michael')", cp)
+    c.as_(bor)
+    c.conn.execute("savepoint s")
+    try:
+        c.conn.execute("select public.request_loan(%s)", (cp,)); raise AssertionError("keine Ausnahme")
+    except E.RaiseException as e:
+        assert "Gast" in str(e); c.conn.execute("rollback to savepoint s")
+    call(c, owner, "return_from_guest(%s)", cp)
+    call(c, bor, "request_loan(%s)", cp)
+
+@test
+def nur_besitzer_oder_admin_darf_gast_ausleihe_aendern(c):
+    owner, bor, other, pz, cp = loan_setup(c); adm = c.user("Adm", role="admin")
+    c.as_(bor); raises(c, E.InsufficientPrivilege, "select public.lend_to_guest(%s, 'X')", cp)
+    c.as_(bor); raises(c, E.InsufficientPrivilege, "update public.copies set guest_name='X', guest_since=now() where id=%s", cp)
+    c.as_(owner); raises(c, E.InsufficientPrivilege, "update public.copies set guest_since=now() where id=%s", cp)   # auch der Besitzer nur über die Funktion
+    call(c, adm, "lend_to_guest(%s, 'Gast')", cp)
+    c.as_(bor); raises(c, E.InsufficientPrivilege, "select public.return_from_guest(%s)", cp)
+    call(c, owner, "return_from_guest(%s)", cp)
+
+@test
+def gast_ausleihe_regeln_doppelt_name_offene_anfragen_rueckgabe(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    c.as_(owner); raises(c, E.RaiseException, "select public.return_from_guest(%s)", cp)        # nicht bei einem Gast
+    raises(c, E.RaiseException, "select public.lend_to_guest(%s, %s)", cp, "x" * 61)
+    loan = call(c, bor, "request_loan(%s)", cp)
+    c.as_(owner); raises(c, E.RaiseException, "select public.lend_to_guest(%s, 'Michael')", cp)  # offene Anfrage
+    call(c, bor, "cancel_loan(%s)", loan)
+    call(c, owner, "lend_to_guest(%s, 'Michael')", cp)
+    c.as_(owner); raises(c, E.RaiseException, "select public.lend_to_guest(%s, 'Anna')", cp)     # schon bei einem Gast
+
+@test
+def gast_ausleihe_nicht_waehrend_laufender_ausleihe(c):
+    owner, bor, other, pz, cp = loan_setup(c)
+    loan = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, true)", loan); call(c, owner, "confirm_handover(%s)", loan)
+    c.as_(owner); raises(c, E.RaiseException, "select public.lend_to_guest(%s, 'Michael')", cp)
+
+@test
+def gaesteregal_nur_fuer_freigegebene_sichtbar(c):
+    owner, bor, other, pz, cp = loan_setup(c); neu = c.user("Neu", status="pending")
+    call(c, owner, "lend_to_guest(%s, 'Michael')", cp)
+    c.as_(neu); raises(c, E.InsufficientPrivilege, "select * from public.guest_items()")
+    c.as_(None, "anon"); raises(c, E.InsufficientPrivilege, "select * from public.guest_items()")
+    c.as_(neu); assert c.conn.execute("select count(*) from public.copy_current_state").fetchone()[0] == 0
 
 if __name__ == "__main__":
     setup()

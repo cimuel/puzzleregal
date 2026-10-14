@@ -16,6 +16,7 @@ const sorts = [['pieces', 'Anzahl Teile'], ['time', 'Beste Lösungszeit'], ['bra
 
 function OwnCopyTools({ row, members, onChange }: { row: ShelfRow; members: { id: string; display_name: string }[]; onChange: () => void }) {
   const [to, setTo] = useState('')
+  const [guest, setGuest] = useState('')
   const [error, setError] = useState<string | null>(null)
   const busy = row.is_on_loan || row.is_reserved
 
@@ -24,6 +25,12 @@ function OwnCopyTools({ row, members, onChange }: { row: ShelfRow; members: { id
     if (err) return setError(friendlyError(err.message))
     setError(null); onChange()
   }
+  async function lendToGuest() {
+    try { await rpc('lend_to_guest', { p_copy: row.copy_id, p_guest_name: guest || null }); setError(null); setGuest(''); onChange() } catch (e) { setError(e instanceof Error ? e.message : 'Unbekannter Fehler.') }
+  }
+  async function returnFromGuest() {
+    try { await rpc('return_from_guest', { p_copy: row.copy_id }); setError(null); onChange() } catch (e) { setError(e instanceof Error ? e.message : 'Unbekannter Fehler.') }
+  }
   async function transfer() {
     if (!to || !window.confirm(`«${row.title}» wirklich an ${members.find((m) => m.id === to)?.display_name} übertragen? Das Puzzle gehört dann nicht mehr dir.`)) return
     try { await rpc('transfer_copy', { p_copy: row.copy_id, p_new_owner: to }); setError(null); onChange() } catch (e) { setError(e instanceof Error ? e.message : 'Unbekannter Fehler.') }
@@ -31,6 +38,16 @@ function OwnCopyTools({ row, members, onChange }: { row: ShelfRow; members: { id
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-2 text-sm">
       <label className="flex items-center gap-2"><input type="checkbox" className="size-5" checked={row.is_lendable} onChange={(e) => toggle(e.target.checked)} />Zum Ausleihen freigegeben</label>
+      {row.is_with_guest ? (
+        <Button variant="secondary" onClick={returnFromGuest}>Vom Gast zurück erhalten</Button>
+      ) : (
+        <details><summary className="cursor-pointer text-teal-dark underline">An einen Gast ohne Konto ausgeliehen</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input aria-label="Name des Gastes (optional)" placeholder="Name, optional" maxLength={60} value={guest} onChange={(e) => setGuest(e.target.value)} className="min-h-10 rounded-lg border border-line bg-white px-3" />
+            <Button variant="secondary" disabled={busy} onClick={lendToGuest}>Eintragen</Button>
+          </div>
+          {busy && <p className="mt-1 text-ink-soft">Nicht möglich, solange das Puzzle reserviert oder verliehen ist.</p>}
+        </details>)}
       <details><summary className="cursor-pointer text-teal-dark underline">Eigentum übertragen</summary>
         <div className="mt-2 flex flex-wrap gap-2">
           <select aria-label="Neue Besitzerin oder neuer Besitzer" value={to} onChange={(e) => setTo(e.target.value)} className="min-h-10 rounded-lg border border-line bg-white px-2"><option value="">Person wählen</option>{members.map((m) => <option key={m.id} value={m.id}>{m.display_name}</option>)}</select>
@@ -93,11 +110,13 @@ export function Shelf({ own = false }: { own?: boolean }) {
                   <p className="text-ink-soft">{[r.brand, `${formatInt(r.piece_count)} Teile`].filter(Boolean).join(', ')}</p>
                   <p className="text-sm">Beste Zeit {name ? `von ${name}` : ''}: <strong>{formatDuration(r.best_seconds)}</strong> · {r.attempts_count} {r.attempts_count === 1 ? 'Versuch' : 'Versuche'}</p>
                   <div className="mt-auto flex flex-wrap gap-2 pt-1">
-                    {borrowed ? <Chip tone="warn">ausgeliehen von {r.owner_name}</Chip> : r.is_on_loan ? <Chip tone="warn">ausgeliehen an {r.holder_name}</Chip> : r.is_reserved ? <Chip tone="warn">reserviert</Chip> : <Chip tone="good">zu Hause</Chip>}
+                    {r.is_with_guest ? <Chip tone="warn">bei Gast{r.guest_name ? ` (${r.guest_name})` : ''}</Chip> : borrowed ? <Chip tone="warn">ausgeliehen von {r.owner_name}</Chip> : r.is_on_loan ? <Chip tone="warn">ausgeliehen an {r.holder_name}</Chip> : r.is_reserved ? <Chip tone="warn">reserviert</Chip> : <Chip tone="good">zu Hause</Chip>}
                     {r.is_lendable && !borrowed ? <Chip>ausleihbar</Chip> : !borrowed && <Chip>nicht ausleihbar</Chip>}
                   </div>
                   {r.owner_id === profile?.id
                     ? <OwnCopyTools row={r} members={members.approved.filter((m) => m.id !== profile?.id)} onChange={() => { shelf.reload(); loans.reload() }} />
+                    : r.is_with_guest
+                      ? <p className="text-sm text-ink-soft">Gerade bei einem Gast{r.guest_name ? ` (${r.guest_name})` : ''} und kann nicht ausgeliehen werden.</p>
                     : r.is_lendable
                       ? <RequestLoan copyId={r.copy_id} mine={loans.myActiveByCopy.get(r.copy_id)} onDone={() => { shelf.reload(); loans.reload() }} />
                       : <p className="text-sm text-ink-soft">Nicht zum Ausleihen freigegeben.</p>}

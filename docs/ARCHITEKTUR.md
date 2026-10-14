@@ -1,4 +1,4 @@
-# Architektur und Entscheide (Stand Phase 4)
+# Architektur und Entscheide (Stand Phase 4 + Gästeregal)
 
 | Thema | Entscheid | Grund |
 |---|---|---|
@@ -28,6 +28,15 @@
 | Mehrere Anfragen | bleiben offen, Annahme nur wenn nicht vergeben | nichts geht verloren, wenn eine Ausleihe platzt |
 | Mitteilungen | Tabelle `notifications`, von Datenbankfunktionen geschrieben | kein E-Mail-Dienst nötig |
 | Eigentum | `transfer_copy` mit Verlauf in `ownership_history` | Eigentum und Standort bleiben getrennt nachvollziehbar |
+
+| Gästeregal | `copies.guest_name` und `copies.guest_since`, Setzen nur über `lend_to_guest` und `return_from_guest` | Puzzles bei Gästen ohne Konto sind sichtbar und nicht ausleihbar |
+| Schreibrechte auf Spalten | Tabellenrecht entziehen, dann nur erlaubte Spalten vergeben | Ein Spaltenverbot allein wirkt nicht, solange das Tabellenrecht besteht |
+
+## Sicherheits-Korrektur in Migration 0005
+Seit Phase 2 war auf `copies` das Recht «aktualisieren» für die ganze Tabelle vergeben und nur `owner_id` per
+Spaltenverbot ausgenommen. Das Spaltenverbot wirkte nicht. Verhindert wurde ein Fremdzugriff trotzdem durch die
+Zeilenregel, aber an der falschen Stelle. Seit 0005 sind nur `is_lendable` und `note` direkt schreibbar, und ein
+Test prüft die Spaltenrechte aller sensiblen Spalten direkt (`sensible_spalten_sind_per_spaltenrecht_gesperrt`).
 
 ## Bekannte Lücken (bewusst offen)
 - Keine E-Mail-Benachrichtigung: Mitteilungen sieht man nur in der App (Zähler im Menü, Aktualisierung beim Öffnen, bei Fokus und jede Minute).

@@ -2,13 +2,14 @@
 
 Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzle-Community.
 
-**Stand: Phase 4 von 6** (Ausleihsystem).
+**Stand: Phase 4 von 6** (Ausleihsystem) plus Gästeregal.
 - Phase 2: Registrierung mit Einladungscode, Admin-Freigabe, Anmeldung, Berechtigungen, Adminbereich.
 - Phase 3: Puzzles erfassen (mit Foto, Doppelt-Erkennung, optional Meisterschaft), Alle Puzzles (Suche, Filter, Sortierung),
   Puzzle-Detailseite mit Rangliste, Regale (Karten, umschaltbare Sortierung), Zeiterfassung (Einzel, Paar, Team),
   Personenprofil mit Statistiken und Verlauf.
 - Phase 4: Ausleihen (anfragen, annehmen oder ablehnen, Übergabe, Rückgabe), Verlauf, Mitteilungen in der App,
   Eigentumswechsel, Schalter «zum Ausleihen freigegeben».
+- Zusatz: **Gästeregal** (Orte ausserhalb des eigenen Regals, dort nicht ausleihbar).
 - **Noch nicht gebaut:** Wettkampfimport und Rangschätzung (Phase 5), E-Mail-Benachrichtigungen (optional, später).
 
 ## Aufbau
@@ -53,6 +54,16 @@ Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzl
 1. Repository → **Settings → Pages** → *Source*: **GitHub Actions**.
 2. Reiter **Actions**: Der Lauf «Veröffentlichen (GitHub Pages)» startet bei jedem Commit auf `main`.
    Grün = veröffentlicht. Adresse: `https://cimuel.github.io/puzzleregal/`
+
+## Update: Gästeregal einspielen (wenn Phase 4 schon läuft)
+
+**Reihenfolge einhalten: zuerst die Datenbank, dann der Code.**
+1. Supabase, **SQL Editor**, **New query**, nacheinander und jeweils **nur einmal**:
+   a) `supabase/migrations/0005_gaesteregal.sql`, **nur falls du sie noch nicht ausgeführt hast**. Sie legt auch Schreibrechte auf Exemplaren strenger fest (siehe `docs/ARCHITEKTUR.md`).
+   b) `supabase/migrations/0006_gaesteregal_gastausleihe.sql`. Sie ersetzt das Orte-Konzept aus 0005 durch die Gast-Ausleihe. Puzzles, die du in 0005 schon an einen Ort gestellt hast, erscheinen danach als «bei Gast» ohne Namen.
+   Erwartet jeweils: «Success».
+2. GitHub: den **gesamten** Inhalt des entpackten Ordners nochmals hochladen (Upload files, Commit). Keine Datei fällt weg.
+3. Reiter **Actions**: warten, bis der Lauf grün ist. Seite mit Strg + F5 neu laden.
 
 ## Update auf Phase 4 einspielen (wenn Phase 3 schon läuft)
 
@@ -111,3 +122,12 @@ Wartende und gesperrte Konten sehen keine Puzzles, Zeiten oder Profile anderer.
 7. **Admins** können hängende Ausleihen im Adminbereich abschliessen.
 8. **Eigentumswechsel:** nur durch die Besitzerin, nie bei offenen Anfragen oder laufender Ausleihe. Der Verlauf wird gespeichert.
 9. Mitteilungen erscheinen in der App (Menü «Mitteilungen» mit Zähler). Es werden keine E-Mails verschickt.
+
+## Gästeregal (Puzzles bei Gästen ohne Konto)
+- Das **Gästeregal** zeigt alle Puzzles von Mitgliedern, die gerade bei Freunden **ohne Konto** sind.
+- In **Mein Regal** trägst du bei einem eigenen Puzzle «An einen Gast ohne Konto ausgeliehen» ein (Name optional, ein Vorname genügt).
+  Wenn du es zurück hast: «Vom Gast zurück erhalten».
+- Ein Puzzle bei einem Gast ist **nicht ausleihbar**: Die Anfrage-Schaltfläche fehlt, und die Datenbank lehnt Anfragen ab.
+- Eintragen geht nur, wenn keine offene Anfrage und keine Ausleihe läuft.
+- Der Eigentümer bleibt erhalten. Das Puzzle bleibt in deinem Regal mit dem Hinweis «bei Gast (Name)».
+- Der Name des Gastes ist für alle Mitglieder sichtbar. Verwende nur, was du weitergeben darfst.
