@@ -74,3 +74,27 @@ export interface GuestItem {
   copy_id: string; puzzle_id: string; title: string; brand: string | null; piece_count: number
   image_path: string | null; owner_id: string; owner_name: string; guest_name: string | null; guest_since: string
 }
+
+export interface RoundOverviewRow {
+  round_id: string; event_name: string; event_year: number; round_name: string; team_size: number
+  piece_count: number | null; time_limit_seconds: number | null; results_url: string | null
+  puzzle_id: string | null; puzzle_title: string | null; puzzle_name_source: string | null
+  entries_count: number; linked_members: number; fetched_at: string | null
+}
+export type RankReason = 'no_results' | 'different_format' | 'different_pieces' | 'over_time_limit' | null
+export interface RankEstimateRow {
+  round_id: string; event_name: string; event_year: number; round_name: string; round_team_size: number
+  piece_count: number | null; time_limit_seconds: number | null; results_url: string | null
+  eligible: boolean; reason: RankReason; estimated_rank: number | null; finished_count: number
+  entries_count: number; faster_count: number; same_time_count: number; fetched_at: string | null
+}
+export interface OfficialResultRow {
+  result_id: string; round_id: string; event_name: string; event_year: number; round_name: string; team_size: number
+  entry_name: string; rank: number; status: 'finished' | 'unfinished'; finish_seconds: number | null
+  pieces_placed: number | null; piece_count: number | null; entries_count: number; puzzle_id: string | null; puzzle_title: string | null
+}
+export interface RoundResultRow {
+  id: string; rank: number; entry_name: string; country: string | null; status: 'finished' | 'unfinished'
+  finish_seconds: number | null; pieces_placed: number | null; fetched_at: string
+  official_result_members: { id: string; member_name: string; wjpc_slug: string | null; profile_id: string | null }[]
+}

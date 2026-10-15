@@ -1,4 +1,4 @@
-# Architektur und Entscheide (Stand Phase 4 + Gästeregal)
+# Architektur und Entscheide (Stand Phase 5)
 
 | Thema | Entscheid | Grund |
 |---|---|---|
@@ -32,6 +32,11 @@
 | Gästeregal | `copies.guest_name` und `copies.guest_since`, Setzen nur über `lend_to_guest` und `return_from_guest` | Puzzles bei Gästen ohne Konto sind sichtbar und nicht ausleihbar |
 | Schreibrechte auf Spalten | Tabellenrecht entziehen, dann nur erlaubte Spalten vergeben | Ein Spaltenverbot allein wirkt nicht, solange das Tabellenrecht besteht |
 
+| Resultate holen | Import durch Admin aus gespeicherter Seite, kopierter Tabelle oder CSV, kein automatischer Abruf | Ein Browser darf die WJPC-Seite nicht direkt abrufen; ein Server-Abruf liesse sich ohne Test gegen die echte Seite nicht prüfen |
+| Import | `import_round_results`: ersetzt die Runde atomar, Fehler lassen die alten Resultate unverändert | nie halb importiert |
+| Zuordnung | WJPC-Kürzel im Profil, sonst voller Name (nur bei genau einem Treffer), sonst von Hand | keine falschen Zuordnungen bei gleichen Namen |
+| Rangschätzung | `rank_estimates`: nur gleiches Puzzle, gleiche Wettkampfart, gleiche Teilezahl, im Zeitlimit | Resultate anderer Puzzles oder Formate sind nicht vergleichbar (Beispiel Fast Pi: 1:00:20 in Gruppe E, 1:46:43 im Final) |
+
 ## Sicherheits-Korrektur in Migration 0005
 Seit Phase 2 war auf `copies` das Recht «aktualisieren» für die ganze Tabelle vergeben und nur `owner_id` per
 Spaltenverbot ausgenommen. Das Spaltenverbot wirkte nicht. Verhindert wurde ein Fremdzugriff trotzdem durch die
@@ -39,6 +44,9 @@ Zeilenregel, aber an der falschen Stelle. Seit 0005 sind nur `is_lendable` und `
 Test prüft die Spaltenrechte aller sensiblen Spalten direkt (`sensible_spalten_sind_per_spaltenrecht_gesperrt`).
 
 ## Bekannte Lücken (bewusst offen)
+- **Der Import ist auf den Aufbau der WJPC-Seite von Oktober 2026 abgestimmt.** Ändert WJPC das HTML, kann das Einlesen brechen. Die Vorschau zeigt das vor dem Import; CSV bleibt als Ersatz.
+- Das Einfügen kopierter Tabellen aus der Zwischenablage ist nicht mit einem echten Browser geprüft. Die gespeicherte Seite ist der zuverlässigere Weg.
+- Es gibt keine Oberfläche, um einzelne Resultate zu bearbeiten (nur Runde ersetzen oder löschen).
 - Keine E-Mail-Benachrichtigung: Mitteilungen sieht man nur in der App (Zähler im Menü, Aktualisierung beim Öffnen, bei Fokus und jede Minute).
 - Es gibt keine Erinnerung bei überfälligen Ausleihen und kein Rückgabedatum.
 - Wer eine Ausleihe stornieren will, nachdem das Puzzle übergeben wurde, muss die Rückgabe durchlaufen.

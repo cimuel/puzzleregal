@@ -4,7 +4,7 @@ Ausführung (lokale PostgreSQL, Superuser-Verbindung):
     python3 supabase/tests/db_test.py
 Jeder Test läuft in einer eigenen Transaktion, die am Ende zurückgerollt wird.
 """
-import os, sys, pathlib, uuid
+import os, sys, pathlib, uuid, json
 import psycopg
 from psycopg import errors as E
 
@@ -19,7 +19,7 @@ def setup():
         conn.execute("drop schema if exists public cascade; create schema public;")
         conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql", "../migrations/0007_phase5_wettkampf.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -895,6 +895,205 @@ def gaesteregal_nur_fuer_freigegebene_sichtbar(c):
     c.as_(neu); raises(c, E.InsufficientPrivilege, "select * from public.guest_items()")
     c.as_(None, "anon"); raises(c, E.InsufficientPrivilege, "select * from public.guest_items()")
     c.as_(neu); assert c.conn.execute("select count(*) from public.copy_current_state").fetchone()[0] == 0
+
+# ---------------- Phase 5: Wettkampfresultate und Rangschätzung ----------------
+def fin(rank, name, secs, members=None, country="Switzerland"):
+    return {"rank": rank, "entry_name": name, "country": country, "status": "finished", "finish_seconds": secs, "pieces_placed": None,
+            "members": members or []}
+def unf(rank, name, pieces, members=None):
+    return {"rank": rank, "entry_name": name, "country": "Switzerland", "status": "unfinished", "finish_seconds": None, "pieces_placed": pieces,
+            "members": members or []}
+J = lambda rows: json.dumps(rows)
+
+def ensure_round(c, adm, puzzle=None, team=4, pieces=1000, limit=7200, name="Finale"):
+    return call(c, adm, "admin_ensure_round('SPM Schweizer Puzzle Meisterschaft 2026', 2026, %s, %s::smallint, %s, %s, 'https://example.org/res', %s, 'Lavaux Vineyards')",
+                name, team, pieces, limit, puzzle)
+
+def import_rows(c, adm, rnd, rows):
+    c.as_(adm)
+    return c.conn.execute("select public.import_round_results(%s, %s::jsonb, 'https://example.org/res')", (rnd, J(rows))).fetchone()[0]
+
+# Auszug aus der echten Team-Finalrangliste (SPM 2026): Rang 1, 2, Gleichstand 27/27 -> 29, Fast Pi, nicht fertig
+WJPC_TEAM_FINAL = [fin(1, "Magical September Girlies And Stefan", 3483), fin(2, "The Swiss Unicorns", 3798),
+                   fin(27, "Kniffle Drachen", 6022), fin(27, "The Cool Cats", 6022, country="Germany"), fin(29, "Confrérie Des Assembleurs", 6037),
+                   fin(35, "Fast Pi", 6403, [{"name": "Corina Spreiter", "slug": "corina-spreiter"}, {"name": "Cinja Müller", "slug": None},
+                                              {"name": "Caroline Böttger", "slug": None}, {"name": "Severina Haas", "slug": None}]),
+                   unf(51, "Oktopuzzlers", 992), unf(52, "Puzzlehochburg", 959)]
+
+@test
+def runde_anlegen_nur_admin_und_findet_vorhandene(c):
+    adm = c.user("Adm", role="admin"); anna = c.user("Anna"); pz = c.puzzle(anna, title="Lavaux Vineyards", pieces=1000)
+    c.as_(anna); raises(c, E.InsufficientPrivilege, "select public.admin_ensure_round('X', 2026, 'Finale', 4::smallint)")
+    r1 = ensure_round(c, adm, pz)
+    r2 = ensure_round(c, adm, pz)
+    assert r1 == r2
+    row = c.sql("select e.name, e.year, r.name, r.team_size, r.piece_count, r.time_limit_seconds, r.puzzle_id, r.puzzle_name_source from public.rounds r join public.events e on e.id=r.event_id").fetchone()
+    assert row == ("SPM Schweizer Puzzle Meisterschaft 2026", 2026, "Finale", 4, 1000, 7200, pz, "Lavaux Vineyards"), row
+
+@test
+def runde_prueft_teilezahl_des_puzzles_und_eingaben(c):
+    adm = c.user("Adm", role="admin"); pz = c.puzzle(adm, pieces=500)
+    c.as_(adm)
+    raises(c, E.RaiseException, "select public.admin_ensure_round('SPM', 2026, 'Finale', 4::smallint, 1000, null, null, %s)", pz)   # 500 <> 1000
+    raises(c, E.RaiseException, "select public.admin_ensure_round('SPM', 1800, 'Finale', 4::smallint)")
+    raises(c, E.RaiseException, "select public.admin_ensure_round(' ', 2026, 'Finale', 4::smallint)")
+    raises(c, E.RaiseException, "select public.admin_ensure_round('SPM', 2026, 'Finale', 4::smallint, null, null, 'javascript:x')")
+    rid = call(c, adm, "admin_ensure_round('SPM', 2026, 'Finale', 1::smallint, null, null, null, %s)", pz)   # Teilezahl wird vom Puzzle übernommen
+    assert c.sql("select piece_count from public.rounds where id=%s", rid).fetchone()[0] == 500
+
+@test
+def import_speichert_resultate_mitglieder_und_ordnet_zu(c):
+    adm = c.user("Adm", role="admin"); corina = c.user("Corina"); cinja = c.user("Cinja Müller")
+    c.sql("update public.profiles set wjpc_slug='corina-spreiter' where id=%s", corina)
+    rnd = ensure_round(c, adm)
+    res = import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    assert res == {"imported": 8, "members": 4, "linked": 2}, res          # Corina per Kürzel, Cinja per vollem Namen
+    linked = c.sql("select member_name, profile_id from public.official_result_members order by member_name").fetchall()
+    assert dict(linked)["Corina Spreiter"] == corina and dict(linked)["Cinja Müller"] == cinja
+    assert dict(linked)["Caroline Böttger"] is None
+    r = c.sql("select rank, entry_name, status, finish_seconds, pieces_placed from public.official_results where entry_name in ('Oktopuzzlers','Fast Pi') order by rank").fetchall()
+    assert r == [(35, "Fast Pi", "finished", 6403, None), (51, "Oktopuzzlers", "unfinished", None, 992)], r
+
+@test
+def import_ersetzt_vorherige_resultate_der_runde(c):
+    adm = c.user("Adm", role="admin"); rnd = ensure_round(c, adm)
+    import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    import_rows(c, adm, rnd, [fin(1, "Nur Einer", 3000)])
+    assert c.sql("select count(*) from public.official_results").fetchone()[0] == 1
+    assert c.sql("select count(*) from public.official_result_members").fetchone()[0] == 0     # Mitglieder werden mitgelöscht
+
+@test
+def import_prueft_zeilen_und_rechte(c):
+    adm = c.user("Adm", role="admin"); anna = c.user("Anna"); rnd = ensure_round(c, adm)
+    c.as_(anna); raises(c, E.InsufficientPrivilege, "select public.import_round_results(%s, %s::jsonb)", rnd, J([fin(1, "X", 3000)]))
+    c.as_(adm)
+    raises(c, E.RaiseException, "select public.import_round_results(%s, '[]'::jsonb)", rnd)
+    raises(c, E.RaiseException, "select public.import_round_results(%s, '{}'::jsonb)", rnd)
+    raises(c, E.RaiseException, "select public.import_round_results(%s, %s::jsonb)", rnd, J([fin(1, "X", 3000), {"rank": 2, "entry_name": "Kaputt", "status": "finished"}]))   # fertig ohne Zeit
+    raises(c, E.RaiseException, "select public.import_round_results(%s, %s::jsonb)", rnd, J([{"rank": 0, "entry_name": "X", "status": "finished", "finish_seconds": 5}]))
+    raises(c, E.RaiseException, "select public.import_round_results(%s, %s::jsonb)", rnd, J([{"rank": 1, "entry_name": " ", "status": "finished", "finish_seconds": 5}]))
+    raises(c, E.RaiseException, "select public.import_round_results(%s, %s::jsonb, 'ftp://x')", rnd, J([fin(1, "X", 3000)]))
+    assert c.sql("select count(*) from public.official_results").fetchone()[0] == 0     # nichts halb importiert
+
+@test
+def fehlerhafter_import_laesst_bestehende_resultate_unveraendert(c):
+    adm = c.user("Adm", role="admin"); rnd = ensure_round(c, adm)
+    import_rows(c, adm, rnd, [fin(1, "Alt", 3000)])
+    c.as_(adm)
+    c.conn.execute("savepoint s")
+    try:
+        c.conn.execute("select public.import_round_results(%s, %s::jsonb)", (rnd, J([fin(1, "Neu", 3000), {"rank": 2, "entry_name": "Kaputt", "status": "finished"}])))
+        raise AssertionError("keine Ausnahme")
+    except E.RaiseException:
+        c.conn.execute("rollback to savepoint s")
+    assert c.sql("select entry_name from public.official_results").fetchall() == [("Alt",)]
+
+@test
+def namensabgleich_ordnet_bei_mehrdeutigkeit_nicht_zu(c):
+    adm = c.user("Adm", role="admin"); rnd = ensure_round(c, adm)
+    c.user("Anna A"); b = c.user("Anna B"); c.sql("update public.profiles set display_name='Anna A' where id=%s", b)   # zwei gleiche Anzeigenamen
+    import_rows(c, adm, rnd, [fin(1, "T", 3000, [{"name": "anna a", "slug": None}])])
+    assert c.sql("select profile_id from public.official_result_members").fetchone()[0] is None
+
+@test
+def resultate_nur_fuer_freigegebene_lesbar_schreiben_nur_admin(c):
+    adm = c.user("Adm", role="admin"); anna = c.user("Anna"); neu = c.user("Neu", status="pending"); rnd = ensure_round(c, adm)
+    import_rows(c, adm, rnd, [fin(1, "X", 3000)])
+    c.as_(anna); assert c.conn.execute("select count(*) from public.official_results").fetchone()[0] == 1
+    assert c.conn.execute("delete from public.official_results").rowcount == 0                       # Zeilenregel: es wird nichts gelöscht
+    assert c.conn.execute("update public.official_results set rank = 99").rowcount == 0
+    assert c.conn.execute("select count(*) from public.official_results").fetchone()[0] == 1
+    raises(c, E.Error, "insert into public.official_results (round_id, rank, entry_name, status, finish_seconds) select id, 2, 'Fake', 'finished', 1 from public.rounds")
+    c.as_(neu); assert c.conn.execute("select count(*) from public.official_results").fetchone()[0] == 0
+    c.as_(anna); raises(c, E.InsufficientPrivilege, "select public.delete_round_results(%s)", rnd)
+    assert call(c, adm, "delete_round_results(%s)", rnd) == 1
+
+@test
+def rangschaetzung_gleichstand_unfertige_und_rangformel(c):
+    adm = c.user("Adm", role="admin"); pz = c.puzzle(adm, title="Lavaux Vineyards", pieces=1000); rnd = ensure_round(c, adm, pz)
+    import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    def est(sec, team=4):
+        c.as_(adm)
+        return c.conn.execute("select estimated_rank, faster_count, same_time_count, finished_count, entries_count, eligible, reason from public.rank_estimates(%s, %s, %s::smallint)", (pz, sec, team)).fetchone()
+    assert est(3000) == (1, 0, 0, 6, 8, True, None)                     # schneller als alle
+    assert est(3483) == (1, 0, 1, 6, 8, True, None)                     # gleiche Zeit wie Rang 1: gleicher Rang
+    assert est(6022)[0] == 3 and est(6022)[2] == 2                      # zwei Teams mit gleicher Zeit: Rang 3 (nach 2 schnelleren)
+    assert est(6403)[0] == 6                                            # wie Fast Pi: nach 5 schnelleren
+    assert est(7000)[0] == 7                                            # langsamer als alle Fertigen, aber noch im Zeitlimit: vor den Unfertigen
+    assert est(7000)[3] == 6 and est(7000)[4] == 8
+
+@test
+def rangschaetzung_verweigert_unpassende_vergleiche_mit_grund(c):
+    adm = c.user("Adm", role="admin"); pz = c.puzzle(adm, pieces=1000); rnd = ensure_round(c, adm, pz)
+    c.as_(adm)
+    q = "select eligible, reason, estimated_rank from public.rank_estimates(%s, %s, %s::smallint)"
+    assert c.conn.execute(q, (pz, 3000, 4)).fetchone() == (False, "no_results", None)         # Runde ohne Resultate
+    import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    c.as_(adm)
+    assert c.conn.execute(q, (pz, 3000, 1)).fetchone() == (False, "different_format", None)    # Einzelzeit gegen Teamresultate
+    assert c.conn.execute(q, (pz, 3000, 2)).fetchone() == (False, "different_format", None)
+    assert c.conn.execute(q, (pz, 7201, 4)).fetchone() == (False, "over_time_limit", None)     # über dem Zeitlimit
+    assert c.conn.execute(q, (pz, 7200, 4)).fetchone()[0] is True
+
+@test
+def rangschaetzung_nur_fuer_verknuepftes_puzzle_und_gleiche_teilezahl(c):
+    adm = c.user("Adm", role="admin"); pz = c.puzzle(adm, pieces=1000); other = c.puzzle(adm, title="Anderes", no="2", brand="Heye", pieces=1000)
+    rnd = ensure_round(c, adm, pz); import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    c.as_(adm)
+    assert c.conn.execute("select count(*) from public.rank_estimates(%s, 3000, 4::smallint)", (other,)).fetchone()[0] == 0   # anderes Puzzle: keine Schätzung
+    # Teilezahl-Konflikt entsteht, wenn die Runde eine andere Teilezahl hat als das Puzzle
+    c.sql("update public.rounds set piece_count=500 where id=%s", rnd)
+    c.as_(adm); assert c.conn.execute("select reason from public.rank_estimates(%s, 3000, 4::smallint)", (pz,)).fetchone()[0] == "different_pieces"
+
+@test
+def rangschaetzung_zeigt_quelle_und_nur_fuer_freigegebene(c):
+    adm = c.user("Adm", role="admin"); neu = c.user("Neu", status="pending"); pz = c.puzzle(adm, pieces=1000); rnd = ensure_round(c, adm, pz)
+    import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    c.as_(adm)
+    r = c.conn.execute("select event_name, event_year, round_name, results_url, fetched_at is not null from public.rank_estimates(%s, 3000, 4::smallint)", (pz,)).fetchone()
+    assert r == ("SPM Schweizer Puzzle Meisterschaft 2026", 2026, "Finale", "https://example.org/res", True), r
+    c.as_(neu); raises(c, E.InsufficientPrivilege, "select * from public.rank_estimates(%s, 3000, 4::smallint)", pz)
+    c.as_(None, "anon"); raises(c, E.InsufficientPrivilege, "select * from public.rank_estimates(%s, 3000, 4::smallint)", pz)
+    c.as_(adm); raises(c, E.RaiseException, "select * from public.rank_estimates(%s, 0, 4::smallint)", pz)
+
+@test
+def persoenliche_offizielle_resultate_und_rundenuebersicht(c):
+    adm = c.user("Adm", role="admin"); corina = c.user("Corina"); pz = c.puzzle(adm, title="Lavaux Vineyards", pieces=1000)
+    c.sql("update public.profiles set wjpc_slug='corina-spreiter' where id=%s", corina)
+    rnd = ensure_round(c, adm, pz); import_rows(c, adm, rnd, WJPC_TEAM_FINAL)
+    c.as_(adm)
+    r = c.conn.execute("select event_name, round_name, entry_name, rank, status, finish_seconds, entries_count, puzzle_title from public.player_official_results(%s)", (corina,)).fetchall()
+    assert r == [("SPM Schweizer Puzzle Meisterschaft 2026", "Finale", "Fast Pi", 35, "finished", 6403, 8, "Lavaux Vineyards")], r
+    o = c.conn.execute("select round_name, entries_count, linked_members, puzzle_title from public.rounds_overview()").fetchall()
+    assert o == [("Finale", 8, 1, "Lavaux Vineyards")], o
+    assert c.conn.execute("select count(*) from public.player_official_results(%s)", (adm,)).fetchone()[0] == 0
+
+@test
+def eigenes_wjpc_kuerzel_nur_selbst_und_gueltig_und_eindeutig(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); c.as_(anna)
+    assert c.conn.execute("update public.profiles set wjpc_slug='anna-muster' where id=%s", (anna,)).rowcount == 1
+    assert c.conn.execute("update public.profiles set wjpc_slug='hack-ziel' where id=%s", (bea,)).rowcount == 0
+    raises(c, E.CheckViolation, "update public.profiles set wjpc_slug='Ungültig!' where id=%s", anna)
+    c.as_(bea); raises(c, E.UniqueViolation, "update public.profiles set wjpc_slug='anna-muster' where id=%s", bea)
+
+@test
+def mitglied_kann_resultat_zuordnung_nicht_aendern(c):
+    adm = c.user("Adm", role="admin"); anna = c.user("Anna"); rnd = ensure_round(c, adm)
+    import_rows(c, adm, rnd, [fin(1, "T", 3000, [{"name": "Wer", "slug": None}])])
+    c.as_(anna); assert c.conn.execute("update public.official_result_members set profile_id=%s", (anna,)).rowcount == 0
+    c.as_(adm); assert c.conn.execute("update public.official_result_members set profile_id=%s", (anna,)).rowcount == 1
+
+@test
+def runde_mit_puzzle_verknuepfen_nur_admin_und_teilezahl_muss_passen(c):
+    adm = c.user("Adm", role="admin"); anna = c.user("Anna"); ok = c.puzzle(adm, pieces=1000); bad = c.puzzle(adm, title="Klein", no="2", brand="Heye", pieces=500)
+    rnd = ensure_round(c, adm)                              # Runde mit 1000 Teilen, ohne Puzzle
+    c.as_(anna); raises(c, E.InsufficientPrivilege, "select public.admin_set_round_puzzle(%s, %s)", rnd, ok)
+    c.as_(adm); raises(c, E.RaiseException, "select public.admin_set_round_puzzle(%s, %s)", rnd, bad)
+    call(c, adm, "admin_set_round_puzzle(%s, %s)", rnd, ok)
+    assert c.sql("select puzzle_id from public.rounds where id=%s", rnd).fetchone()[0] == ok
+    call(c, adm, "admin_set_round_puzzle(%s, null)", rnd)
+    assert c.sql("select puzzle_id from public.rounds where id=%s", rnd).fetchone()[0] is None
+    c.as_(adm); raises(c, E.RaiseException, "select public.admin_set_round_puzzle(gen_random_uuid(), %s)", ok)
 
 if __name__ == "__main__":
     setup()

@@ -9,6 +9,7 @@ const nav = [
   { to: '/puzzles', label: 'Alle Puzzles' },
   { to: '/regale', label: 'Alle Regale' },
   { to: '/gaesteregal', label: 'Gästeregal' },
+  { to: '/meisterschaften', label: 'Meisterschaften' },
   { to: '/mein-regal', label: 'Mein Regal' },
   { to: '/mitteilungen', label: 'Mitteilungen' },
   { to: '/ausleihen/anfragen', label: 'Ausleihanfragen' },

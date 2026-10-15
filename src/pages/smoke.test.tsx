@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Rauchtest: Seiten mit nachgebildeten Daten rendern. Prüft Laufzeitfehler und Kernanzeigen, nicht das Aussehen.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -38,6 +38,9 @@ import { LoanRequests } from './LoanRequests'
 import { MyLoans } from './MyLoans'
 import { Notifications } from './Notifications'
 import { GuestShelf } from './GuestShelf'
+import { Championships } from './Championships'
+import { RoundResults } from './RoundResults'
+import { AdminImport } from './AdminImport'
 
 const wrap = (path: string, pattern: string, el: React.ReactElement) =>
   render(<MemoryRouter initialEntries={[path]}><Routes><Route path={pattern} element={el} /></Routes></MemoryRouter>)
@@ -307,5 +310,124 @@ describe('Gästeregal (Rauchtest)', () => {
   it('Gästeregal-Seite: leer zeigt einen verständlichen Hinweis', async () => {
     wrap('/gaesteregal', '/gaesteregal', <GuestShelf />)
     expect(await screen.findByText('Gerade ist kein Puzzle bei einem Gast.')).toBeTruthy()
+  })
+})
+
+const ROUND = { round_id: 'r1', event_name: 'SPM 2026', event_year: 2026, round_name: 'Finale', team_size: 4, piece_count: 1000, time_limit_seconds: 7200,
+  results_url: 'https://worldjigsawpuzzle.org/x', puzzle_id: 'p1', puzzle_title: 'Lavaux Vineyards', puzzle_name_source: 'Lavaux Vineyards', entries_count: 2, linked_members: 1, fetched_at: '2026-10-14T03:00:00Z' }
+
+describe('Wettkampf (Rauchtest)', () => {
+  it('Meisterschaften: zeigt Runden mit Puzzle, Teilezahl und Anzahl Einträge', async () => {
+    mock.rpc.rounds_overview = [ROUND, { ...ROUND, round_id: 'r2', round_name: 'E', entries_count: 0, linked_members: 0, puzzle_id: null, puzzle_title: null }]
+    wrap('/meisterschaften', '/meisterschaften', <Championships />)
+    expect(await screen.findByText('SPM 2026 2026')).toBeTruthy()
+    expect(screen.getByText('2 Einträge')).toBeTruthy()
+    expect(screen.getByText('keine Resultate')).toBeTruthy()
+    expect(screen.getByText('1 aus der Community')).toBeTruthy()
+  })
+
+  it('Rundenresultate: Gleichstand, Nicht-fertig und Community-Markierung', async () => {
+    mock.rpc.rounds_overview = [ROUND]
+    mock.tables.official_results = { rows: [
+      { id: 'o1', rank: 27, entry_name: 'Kniffle Drachen', country: 'Switzerland', status: 'finished', finish_seconds: 6022, pieces_placed: null, fetched_at: 'x', official_result_members: [{ id: 'm1', member_name: 'Janin Sommer', wjpc_slug: 'janin-sommer', profile_id: null }] },
+      { id: 'o2', rank: 35, entry_name: 'Fast Pi', country: 'Switzerland', status: 'finished', finish_seconds: 6403, pieces_placed: null, fetched_at: 'x', official_result_members: [{ id: 'm2', member_name: 'Corina Spreiter', wjpc_slug: 'corina-spreiter', profile_id: 'me' }] },
+      { id: 'o3', rank: 51, entry_name: 'Oktopuzzlers', country: 'Switzerland', status: 'unfinished', finish_seconds: null, pieces_placed: 992, fetched_at: 'x', official_result_members: [] },
+    ] }
+    wrap('/runde/r1', '/runde/:id', <RoundResults />)
+    expect(await screen.findByText('Fast Pi')).toBeTruthy()
+    expect(screen.getByText('1:46:43')).toBeTruthy()
+    expect(screen.getByText(/nicht fertig \(992 Teile\)/)).toBeTruthy()
+    expect(screen.getByText('Community')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Corina Spreiter' }).getAttribute('href')).toBe('/person/me')
+    expect(screen.getByRole('link', { name: 'Lavaux Vineyards' })).toBeTruthy()
+  })
+
+  it('Rangschätzung auf der Puzzle-Seite: zeigt Hypothese mit Quelle, und Gründe bei Nicht-Vergleichbarem', async () => {
+    mock.rpc.puzzle_attempts = [
+      { attempt_id: 'a1', solved_on: '2026-05-01', duration_seconds: 6403, kind: 'training', team_size: 4, participant_names: 'Anna', participant_ids: ['me'], created_by: 'me', notes: null, round_id: null },
+    ]
+    mock.rpc.rank_estimates = [
+      { round_id: 'r1', event_name: 'SPM 2026', event_year: 2026, round_name: 'Finale', round_team_size: 4, piece_count: 1000, time_limit_seconds: 7200, results_url: 'https://worldjigsawpuzzle.org/x', eligible: true, reason: null, estimated_rank: 35, finished_count: 50, entries_count: 70, faster_count: 34, same_time_count: 0, fetched_at: '2026-10-14T03:00:00Z' },
+      { round_id: 'r2', event_name: 'SPM 2026', event_year: 2026, round_name: 'E', round_team_size: 1, piece_count: 1000, time_limit_seconds: 7200, results_url: null, eligible: false, reason: 'different_format', estimated_rank: null, finished_count: 20, entries_count: 20, faster_count: 0, same_time_count: 0, fetched_at: null },
+    ]
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    expect(await screen.findByText('Hypothetische Rangschätzung')).toBeTruthy()
+    expect(await screen.findByText(/etwa auf Rang 35 von 50 fertigen Einträgen/)).toBeTruthy()
+    expect(screen.getByText(/Quelle: offizielle Ergebnisliste/)).toBeTruthy()
+    expect(screen.getByText(/Einzel-, Paar- und Teamzeiten sind nicht vergleichbar/)).toBeTruthy()
+    const call = mock.calls.filter((c) => c.fn === 'rank_estimates').at(-1)!
+    expect(call.args).toEqual({ p_puzzle: 'p1', p_seconds: 6403, p_team_size: 4 })
+  })
+
+  it('Rangschätzung: ohne eigene Zeit wird zuerst zum Erfassen aufgefordert', async () => {
+    mock.rpc.puzzle_attempts = []
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    expect(await screen.findByText(/noch keine Zeit erfasst/)).toBeTruthy()
+    expect(mock.calls.find((c) => c.fn === 'rank_estimates')).toBeUndefined()
+  })
+
+  it('Profil: zeigt offizielle Resultate mit Rang von Anzahl', async () => {
+    mock.rpc.player_official_results = [{ result_id: 'o2', round_id: 'r1', event_name: 'SPM 2026', event_year: 2026, round_name: 'Finale', team_size: 4, entry_name: 'Fast Pi', rank: 35, status: 'finished', finish_seconds: 6403, pieces_placed: null, piece_count: 1000, entries_count: 70, puzzle_id: 'p1', puzzle_title: 'Lavaux Vineyards' }]
+    wrap('/profil', '/profil', <PlayerProfile own />)
+    expect(await screen.findByText('Offizielle Resultate')).toBeTruthy()
+    expect(screen.getByText(/von 70/)).toBeTruthy()
+    expect(screen.getByText(/Fast Pi/)).toBeTruthy()
+  })
+})
+
+const FLAG = '<img title="Switzerland">'
+const IMPORT_PAGE = `<html><head><title>Classification SPM Schweizer Puzzle Meisterschaft 2026 - Teams</title>
+<link rel="canonical" href="https://worldjigsawpuzzle.org/schweizerpuzzlemeisterschaft/2026/teams/finale"></head><body>
+<div><span>1.000</span><span>02:00:00</span></div><img src="https://x/img/puzzles/a.jpg" alt="Lavaux Vineyards">
+<table><thead><tr><th>#</th><th></th><th>Name</th><th>Origin</th><th>Country</th><th>Time</th></tr></thead><tbody>
+<tr><td>1</td><td>${FLAG}</td><td>${FLAG} Switzerland <b>Magical</b> <a href="https://worldjigsawpuzzle.org/player/stefan-enzler">Stefan Enzler</a> / Helene Beutler / A B / C D Bern</td><td>Bern</td><td>Switzerland</td><td>00:58:03</td></tr>
+<tr><td>35</td><td>${FLAG}</td><td>${FLAG} Switzerland <b>Fast Pi</b> <a href="https://worldjigsawpuzzle.org/player/corina-spreiter">Corina Spreiter</a> / Cinja Müller / Caroline Böttger / Severina Haas Aarau</td><td>Aarau</td><td>Switzerland</td><td>01:46:43</td></tr>
+<tr><td>51</td><td>${FLAG}</td><td>${FLAG} Switzerland <b>Oktopuzzlers</b> E F / G H / I J / K L Sursee</td><td>Sursee</td><td>Switzerland</td><td>992 Pieces</td></tr>
+</tbody></table></body></html>`
+
+describe('Import (Rauchtest)', () => {
+  it('Datei einlesen → Vorschau mit Zahlen → Formular vorbelegt → Import sendet Runde und Zeilen', async () => {
+    mock.rpc.find_similar_puzzles = [{ puzzle_id: 'p1', title: 'Lavaux Vineyards', brand: null, product_no: null, piece_count: 1000, image_path: null, reason: 'similar_title', score: 0.9 }]
+    mock.rpc.admin_ensure_round = 'r9'
+    mock.rpc.import_round_results = { imported: 3, members: 12, linked: 1 }
+    wrap('/admin/import', '/admin/import', <AdminImport />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File([IMPORT_PAGE], 'finale.html', { type: 'text/html' }))
+    expect(await screen.findByText('3 Einträge')).toBeTruthy()
+    expect(screen.getByText(/2 fertig, 1 nicht fertig/)).toBeTruthy()
+    expect((screen.getByLabelText('Meisterschaft') as HTMLInputElement).value).toBe('SPM Schweizer Puzzle Meisterschaft 2026')
+    expect((screen.getByLabelText('Runde') as HTMLInputElement).value).toBe('Finale')
+    expect((screen.getByLabelText('Teilezahl der Runde') as HTMLInputElement).value).toBe('1000')
+    expect((screen.getByLabelText('Zeitlimit') as HTMLInputElement).value).toBe('2:00:00')
+    await waitFor(() => expect((screen.getByLabelText('Puzzle der Runde') as HTMLSelectElement).value).toBe('p1'))   // Vorschlag automatisch übernommen
+
+    await userEvent.click(screen.getByRole('button', { name: '3 Resultate importieren' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'import_round_results')).toBeTruthy())
+    const ensure = mock.calls.find((c) => c.fn === 'admin_ensure_round')!.args as Record<string, unknown>
+    expect(ensure).toMatchObject({ p_event_name: 'SPM Schweizer Puzzle Meisterschaft 2026', p_event_year: 2026, p_round_name: 'Finale', p_team_size: 4, p_piece_count: 1000, p_time_limit_seconds: 7200, p_puzzle: 'p1', p_puzzle_name_source: 'Lavaux Vineyards' })
+    const imp = mock.calls.find((c) => c.fn === 'import_round_results')!.args as { p_round: string; p_rows: { rank: number; entry_name: string; members: { name: string; slug: string | null }[] }[] }
+    expect(imp.p_round).toBe('r9')
+    expect(imp.p_rows.map((r) => r.rank)).toEqual([1, 35, 51])
+    expect(imp.p_rows[1].members.map((m) => m.name)).toEqual(['Corina Spreiter', 'Cinja Müller', 'Caroline Böttger', 'Severina Haas'])
+    expect(imp.p_rows[1].members[0].slug).toBe('corina-spreiter')
+    expect(await screen.findByText(/Importiert: 3 Einträge, 1 Personen/)).toBeTruthy()
+  })
+
+  it('CSV-Weg: Text einlesen und Vorschau zeigen', async () => {
+    wrap('/admin/import', '/admin/import', <AdminImport />)
+    await userEvent.click(screen.getByText('CSV oder Text einfügen'))
+    fireEvent.change(screen.getByPlaceholderText(/Rang;Name;Mitglieder/), { target: { value: 'Rang;Name;Mitglieder;Land;Zeit\n1;Fast Pi;Corina / Cinja / Caroline / Severina;Schweiz;1:46:43\n2;Andere;Anna / Bea;Schweiz;992 Pieces' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Einlesen' }))
+    expect(await screen.findByText('2 Einträge')).toBeTruthy()
+    expect(screen.getByText('Corina, Cinja, Caroline, Severina')).toBeTruthy()
+    expect(screen.getByText('1:46:43')).toBeTruthy()
+  })
+
+  it('Datei ohne Tabelle zeigt einen verständlichen Fehler und bietet keinen Import an', async () => {
+    wrap('/admin/import', '/admin/import', <AdminImport />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['<html><body>nichts</body></html>'], 'leer.html', { type: 'text/html' }))
+    expect(await screen.findByText(/Keine Ergebniszeilen gefunden/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Resultate importieren/ })).toBeNull()
   })
 })

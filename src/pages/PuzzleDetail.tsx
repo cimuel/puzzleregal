@@ -10,6 +10,7 @@ import { useMembers } from '../hooks/useMembers'
 import { Button, Card, Field, Spinner } from '../components/ui'
 import { Chip, ErrorBox, PuzzleImage } from '../components/Parts'
 import { RequestLoan } from '../components/Loans'
+import { RankEstimate } from '../components/RankEstimate'
 import { useMyLoans } from '../hooks/useMyLoans'
 
 interface CopyRow { id: string; owner_id: string; is_lendable: boolean; holder_id: string; is_on_loan: boolean; is_reserved: boolean; guest_name: string | null; is_with_guest: boolean }
@@ -178,6 +179,8 @@ export function PuzzleDetail() {
           </div>
         ))}
       </Card>
+
+      <RankEstimate puzzleId={p.id} attempts={attempts.data ?? []} myId={profile?.id} />
 
       <Card>
         <h2 className="mb-3 text-xl font-bold">Meisterschaften</h2>

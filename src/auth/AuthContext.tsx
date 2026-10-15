@@ -11,6 +11,7 @@ export interface Profile {
   role: UserRole
   status: UserStatus
   created_at: string
+  wjpc_slug: string | null
 }
 
 interface AuthState {
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(true)
     const { data } = await supabase
       .from('profiles')
-      .select('id, display_name, role, status, created_at')
+      .select('id, display_name, role, status, created_at, wjpc_slug')
       .eq('id', userId)
       .maybeSingle()
     setProfile((data as Profile | null) ?? null)

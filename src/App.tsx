@@ -21,6 +21,9 @@ import { LoanRequests } from './pages/LoanRequests'
 import { MyLoans } from './pages/MyLoans'
 import { Notifications } from './pages/Notifications'
 import { GuestShelf } from './pages/GuestShelf'
+import { Championships } from './pages/Championships'
+import { RoundResults } from './pages/RoundResults'
+import { AdminImport } from './pages/AdminImport'
 
 export default function App() {
   return (
@@ -48,10 +51,13 @@ export default function App() {
               <Route path="/ausleihen/meine" element={<MyLoans />} />
               <Route path="/mitteilungen" element={<Notifications />} />
               <Route path="/gaesteregal" element={<GuestShelf />} />
+              <Route path="/meisterschaften" element={<Championships />} />
+              <Route path="/runde/:id" element={<RoundResults />} />
               <Route path="/profil" element={<PlayerProfile own />} />
               <Route path="/person/:id" element={<PlayerProfile />} />
               <Route element={<RequireAdmin />}>
                 <Route path="/admin" element={<Admin />} />
+                <Route path="/admin/import" element={<AdminImport />} />
               </Route>
             </Route>
           </Route>

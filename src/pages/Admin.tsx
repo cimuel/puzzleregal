@@ -4,6 +4,7 @@ import { friendlyError } from '../lib/errors'
 import { generateInviteCode } from '../lib/inviteCode'
 import { useAuth, type Profile, type UserRole, type UserStatus } from '../auth/AuthContext'
 import { Button, Card, Field, Notice, Spinner } from '../components/ui'
+import { Link } from 'react-router-dom'
 import { rpc, type LoanRow } from '../lib/api'
 import { LoanItem } from '../components/Loans'
 import { isActive } from '../lib/loans'
@@ -129,6 +130,12 @@ export function Admin() {
             </li>
           ))}
         </ul>
+      </Card>
+
+      <Card>
+        <h2 className="mb-1 text-xl font-bold">Wettkampfresultate</h2>
+        <p className="mb-3 text-sm text-ink-soft">Ergebnislisten von worldjigsawpuzzle.org einlesen und Runden mit Puzzles verknüpfen.</p>
+        <Link to="/admin/import" className="inline-flex min-h-11 items-center rounded-lg bg-teal px-4 font-semibold text-white hover:bg-teal-dark">Resultate importieren</Link>
       </Card>
 
       <Card>

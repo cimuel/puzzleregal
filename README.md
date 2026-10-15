@@ -2,7 +2,7 @@
 
 Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzle-Community.
 
-**Stand: Phase 4 von 6** (Ausleihsystem) plus Gästeregal.
+**Stand: Phase 5 von 6** (Wettkampfintegration), dazu Ausleihsystem und Gästeregal.
 - Phase 2: Registrierung mit Einladungscode, Admin-Freigabe, Anmeldung, Berechtigungen, Adminbereich.
 - Phase 3: Puzzles erfassen (mit Foto, Doppelt-Erkennung, optional Meisterschaft), Alle Puzzles (Suche, Filter, Sortierung),
   Puzzle-Detailseite mit Rangliste, Regale (Karten, umschaltbare Sortierung), Zeiterfassung (Einzel, Paar, Team),
@@ -10,7 +10,9 @@ Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzl
 - Phase 4: Ausleihen (anfragen, annehmen oder ablehnen, Übergabe, Rückgabe), Verlauf, Mitteilungen in der App,
   Eigentumswechsel, Schalter «zum Ausleihen freigegeben».
 - Zusatz: **Gästeregal** (Orte ausserhalb des eigenen Regals, dort nicht ausleihbar).
-- **Noch nicht gebaut:** Wettkampfimport und Rangschätzung (Phase 5), E-Mail-Benachrichtigungen (optional, später).
+- Phase 5: Import offizieller Resultate (gespeicherte WJPC-Seite, kopierte Tabelle oder CSV), Meisterschaften und Rundenseiten,
+  automatische Zuordnung zu Mitgliedern, offizielle Resultate im Profil, **hypothetische Rangschätzung**.
+- **Noch nicht gebaut:** Tests mit echten Daten auf dem laufenden System, Veröffentlichungs-Checkliste (Phase 6), E-Mail-Benachrichtigungen (optional).
 
 ## Aufbau
 
@@ -54,6 +56,14 @@ Digitales Puzzleregal mit Ausleihsystem und Wettkampfstatistik für unsere Puzzl
 1. Repository → **Settings → Pages** → *Source*: **GitHub Actions**.
 2. Reiter **Actions**: Der Lauf «Veröffentlichen (GitHub Pages)» startet bei jedem Commit auf `main`.
    Grün = veröffentlicht. Adresse: `https://cimuel.github.io/puzzleregal/`
+
+## Update auf Phase 5 einspielen (wenn das Gästeregal schon läuft)
+
+**Reihenfolge einhalten: zuerst die Datenbank, dann der Code.**
+1. Supabase, **SQL Editor**, **New query**: Inhalt von `supabase/migrations/0007_phase5_wettkampf.sql` einfügen, **Run**.
+   Erwartet: «Success». Nur **einmal** ausführen.
+2. GitHub: den **gesamten** Inhalt des entpackten Ordners nochmals hochladen (Upload files, Commit). Keine Datei fällt weg.
+3. Reiter **Actions**: warten, bis der Lauf grün ist. Seite mit Strg + F5 neu laden.
 
 ## Update: Gästeregal einspielen (wenn Phase 4 schon läuft)
 
@@ -131,3 +141,24 @@ Wartende und gesperrte Konten sehen keine Puzzles, Zeiten oder Profile anderer.
 - Eintragen geht nur, wenn keine offene Anfrage und keine Ausleihe läuft.
 - Der Eigentümer bleibt erhalten. Das Puzzle bleibt in deinem Regal mit dem Hinweis «bei Gast (Name)».
 - Der Name des Gastes ist für alle Mitglieder sichtbar. Verwende nur, was du weitergeben darfst.
+
+## Wettkampfresultate importieren (nur Admin)
+1. Öffne die Ergebnisseite der Runde auf worldjigsawpuzzle.org, zum Beispiel den Final der Teams.
+2. Speichere die Seite: **Strg + S**, Typ **«Webseite, nur HTML»**.
+3. In der App: **Administration, Resultate importieren**, die Datei hochladen. Alternativ die Tabelle markieren, kopieren und ins Feld einfügen, oder CSV verwenden.
+4. **Vorschau prüfen**: Anzahl Einträge, fertige und nicht fertige, Personen. Kein Ortsname darf als Person erscheinen.
+5. Meisterschaft, Jahr, Runde, Wettkampfart, Teilezahl und Zeitlimit sind aus der Seite vorbelegt. Das **Puzzle** wird vorgeschlagen, wenn es schon erfasst ist (sonst zuerst unter «Neues Puzzle erfassen» anlegen oder später auf der Rundenseite verknüpfen).
+6. **Importieren.** Vorhandene Resultate derselben Runde werden dabei ersetzt.
+
+**Zuordnung zu Mitgliedern:** automatisch über das WJPC-Profil (im eigenen Profil unter «Profil bearbeiten» eintragen) oder bei genau gleichem vollem Namen. Alles andere ordnest du auf der Rundenseite von Hand zu.
+
+## Hypothetische Rangschätzung
+Auf der Puzzle-Seite wählst du eine deiner Zeiten. Die App vergleicht sie mit den offiziellen Resultaten der **mit diesem Puzzle verknüpften** Runden.
+- Verglichen wird nur bei **gleichem Puzzle, gleicher Wettkampfart** (Einzel, Paar, Team), gleicher Teilezahl und **innerhalb des Zeitlimits**. Sonst steht der Grund da, es wird nichts geschätzt.
+- Rang = 1 + Anzahl offizieller, fertiger Resultate mit kürzerer Zeit. Gleiche Zeit ergibt gleichen Rang. Nicht fertig gewordene Einträge zählen als langsamer.
+- Jede Schätzung ist als **hypothetisch** gekennzeichnet und nennt Quelle und Importdatum. Sie ist kein offizielles Ergebnis.
+- Beispiel zur Kontrolle: Mit 1:46:43 als Team ergibt der Final der Teams 2026 den Rang 35 von 50 fertigen Einträgen.
+
+## Datenschutz bei Wettkampfdaten
+Importierte Ergebnislisten enthalten Namen vieler Personen ohne Konto. Sie sind nur für angemeldete, freigegebene Mitglieder sichtbar, nicht öffentlich.
+Ein Admin kann die Resultate einer Runde jederzeit löschen (Rundenseite).

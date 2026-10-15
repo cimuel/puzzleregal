@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { rpc, type PlayerAttemptRow, type PuzzleBestRow, type Scope, type SummaryRow } from '../lib/api'
+import { rpc, type OfficialResultRow, type PlayerAttemptRow, type PuzzleBestRow, type Scope, type SummaryRow } from '../lib/api'
+import { teamLabel } from '../lib/rank'
 import { formatDate, formatDuration, formatInt, formatNumber } from '../lib/time'
 import { useAsync } from '../hooks/useAsync'
 import { useMembers } from '../hooks/useMembers'
@@ -29,6 +30,7 @@ export function PlayerProfile({ own = false }: { own?: boolean }) {
   const bests = useAsync(() => (personId ? rpc<PuzzleBestRow[]>('player_puzzle_bests', { p_profile: personId, p_scope: scope }) : Promise.resolve([])), [personId, scope])
   const attempts = useAsync(() => (personId ? rpc<PlayerAttemptRow[]>('player_attempts', { p_profile: personId, p_scope: scope }) : Promise.resolve([])), [personId, scope])
 
+  const official = useAsync(() => (personId ? rpc<OfficialResultRow[]>('player_official_results', { p_profile: personId }) : Promise.resolve([])), [personId])
   const name = own ? profile?.display_name : members.names.get(personId ?? '')
   const s = summary.data?.[0]
   const n = s?.attempts_count ?? 0
@@ -101,6 +103,17 @@ export function PlayerProfile({ own = false }: { own?: boolean }) {
           </Card>
         </>
       )}
+      {(official.data ?? []).length > 0 && (
+        <Card>
+          <h2 className="mb-1 text-xl font-bold">Offizielle Resultate</h2>
+          <p className="mb-3 text-sm text-ink-soft">Aus importierten Ergebnislisten. Bei Paaren und Teams gilt die Zeit der ganzen Gruppe.</p>
+          <ul className="divide-y divide-line">{(official.data ?? []).map((r) => (
+            <li key={r.result_id} className="py-2">
+              <Link className="font-semibold text-teal-dark underline" to={`/runde/${r.round_id}`}>{r.event_name}, {r.round_name}</Link> <span className="text-ink-soft">({teamLabel(r.team_size)}{r.entry_name && r.team_size > 1 ? `, ${r.entry_name}` : ''})</span><br />
+              Rang <strong>{r.rank}</strong> von {r.entries_count} · {r.status === 'finished' ? formatDuration(r.finish_seconds) : `nicht fertig (${formatInt(r.pieces_placed)} Teile)`}
+              {r.puzzle_id && <> · <Link className="text-teal-dark underline" to={`/puzzle/${r.puzzle_id}`}>{r.puzzle_title}</Link></>}
+            </li>))}</ul>
+        </Card>)}
       {own && <NameCard />}
     </div>
   )
