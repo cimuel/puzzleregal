@@ -63,7 +63,9 @@ function parseNameCell(cell: Element, origin: string, country: string): { entryN
 
   let text = normSpace(clone.textContent)
   if (country && text.toLowerCase().startsWith(country.toLowerCase())) text = normSpace(text.slice(country.length))
-  if (origin && text.endsWith(origin)) text = normSpace(text.slice(0, text.length - origin.length))
+  if (origin && text.endsWith(origin) && (text.length === origin.length || text[text.length - origin.length - 1] === ' ')) {
+    text = normSpace(text.slice(0, text.length - origin.length))
+  }
 
   const members: ParsedMember[] = []
   for (const part of text.split(/\s*\/\s*/)) {
@@ -77,14 +79,41 @@ function parseNameCell(cell: Element, origin: string, country: string): { entryN
   return { entryName, members, hasTeamName: !!team }
 }
 
-function columnMap(table: Element): { rank: number; name: number; origin: number; country: number; time: number } {
-  const defaults = { rank: 0, name: 2, origin: 3, country: 4, time: 5 }
-  const head = table.querySelector('thead tr, tr')
+interface ColumnMap { rank: number; name: number; origin: number; country: number; time: number }
+
+/**
+ * Spalten erkennen. Die Tabellen der WJPC sind je nach Meisterschaft und Jahr verschieden (2026: «#», Flagge, Name, Herkunft,
+ * Land, Zeit; 2024: «#», Name, Herkunft, Zeit). Darum: erst die Überschriften lesen, bei Lücken den Inhalt prüfen.
+ * Herkunft und Land sind optional (-1).
+ */
+function columnMap(table: Element, dataRows: Element[][]): ColumnMap | null {
+  const head = table.querySelector('thead tr') ?? table.querySelector('tr')
   const headers = head ? Array.from(head.querySelectorAll('th')).map((h) => normSpace(h.textContent).toLowerCase()) : []
-  if (headers.length < 5) return defaults
   const find = (...names: string[]) => headers.findIndex((h) => names.includes(h))
-  const map = { rank: find('#', 'rank', 'rang'), name: find('name'), origin: find('origin', 'herkunft'), country: find('country', 'land'), time: find('time', 'zeit') }
-  return Object.values(map).every((i) => i >= 0) ? map : defaults
+  const fromHeader = { rank: find('#', 'rank', 'rang'), name: find('name'), origin: find('origin', 'herkunft'), country: find('country', 'land'), time: find('time', 'zeit') }
+  const width = Math.max(0, ...dataRows.map((r) => r.length))
+  if (fromHeader.rank >= 0 && fromHeader.name >= 0 && fromHeader.time >= 0 && fromHeader.time < width && fromHeader.name < width) return fromHeader
+
+  // Fallback über den Inhalt der Zeilen
+  const sample = dataRows.slice(0, 15)
+  if (sample.length === 0) return null
+  const share = (pred: (c: Element) => boolean) => Array.from({ length: width }, (_, i) => sample.filter((r) => r[i] && pred(r[i])).length / sample.length)
+  const timeShare = share((c) => parseTimeCell(c.textContent ?? '') !== null)
+  const nameShare = share((c) => !!c.querySelector('b, strong, a[href*="/player/"]'))
+  const time = timeShare.indexOf(Math.max(...timeShare))
+  const name = nameShare.indexOf(Math.max(...nameShare))
+  if (timeShare[time] < 0.5 || nameShare[name] < 0.5 || time <= name) return null
+  const originGuess = name + 1 < time ? name + 1 : -1
+  return { rank: 0, name, origin: fromHeader.origin >= 0 ? fromHeader.origin : originGuess, country: fromHeader.country, time }
+}
+
+/** Notfall: erste Zelle rechts vom Namen, die wie eine Zeit oder Teilezahl aussieht. */
+function scanForTime(cells: Element[], from: number) {
+  for (let i = from + 1; i < cells.length; i++) {
+    const t = parseTimeCell(cells[i].textContent ?? '')
+    if (t) return t
+  }
+  return null
 }
 
 /** Liest eine komplette gespeicherte Seite oder ein kopiertes HTML-Stück. */
@@ -94,16 +123,17 @@ export function parseWjpcHtml(html: string): ParsedResults {
   const rows: ParsedRow[] = []
 
   for (const table of Array.from(doc.querySelectorAll('table'))) {
-    const col = columnMap(table)
-    for (const tr of Array.from(table.querySelectorAll('tr'))) {
-      const cells = Array.from(tr.querySelectorAll('td'))
-      if (cells.length <= Math.max(col.name, col.time)) continue
+    const dataRows = Array.from(table.querySelectorAll('tr')).map((tr) => Array.from(tr.querySelectorAll('td'))).filter((cells) => cells.length >= 3)
+    const col = columnMap(table, dataRows)
+    if (!col) { if (dataRows.length > 0) warnings.push('Die Spalten einer Tabelle konnten nicht erkannt werden (Rang, Name, Zeit). Diese Tabelle wurde übersprungen.'); continue }
+    for (const cells of dataRows) {
+      if (cells.length <= Math.max(col.name, col.time, col.rank)) continue
       const rank = Number(normSpace(cells[col.rank].textContent))
       if (!Number.isInteger(rank) || rank <= 0) continue
-      const country = normSpace(cells[col.country]?.textContent)
-      const origin = normSpace(cells[col.origin]?.textContent)
+      const country = col.country >= 0 ? normSpace(cells[col.country]?.textContent) : ''
+      const origin = col.origin >= 0 ? normSpace(cells[col.origin]?.textContent) : ''
       const { entryName, members } = parseNameCell(cells[col.name], origin, country)
-      const time = parseTimeCell(cells[col.time].textContent ?? '')
+      const time = parseTimeCell(cells[col.time].textContent ?? '') ?? scanForTime(cells, col.name)
       if (!entryName) { warnings.push(`Rang ${rank}: kein Name erkannt, Zeile übersprungen.`); continue }
       if (!time) { warnings.push(`Rang ${rank} («${entryName}»): weder Zeit noch Teilezahl erkannt, Zeile übersprungen.`); continue }
       rows.push({

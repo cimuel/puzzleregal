@@ -193,3 +193,110 @@ describe('extractWjpcSlug', () => {
     expect(extractWjpcSlug('x')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// Regression: Seite der SPM 2024 (Teams, Final). Andere Tabelle als 2026: nur 6 Spalten, KEINE Flaggen- und KEINE Länderspalte,
+// im Namen steht kein Landname. Fehler damals: «Rang 1 («Bern»): weder Zeit noch Teilezahl erkannt».
+const row24 = (rank: number, team: string, members: string[], origin: string, time: string) =>
+  `<tr><td>${rank}</td><td><b>${team}</b>   ${members.join(' / ')}   ${origin}</td><td>${origin}</td><td>${time}</td><td></td><td></td></tr>`
+const ROWS_2024 = [
+  row24(1, 'Once Upon A Puzzle', [link('Patrick Inniger', 'patrick-inniger'), link('Maria Golova', 'maria-golova'), link('Letizia Pomes', 'letizia-pomes'), link('Stefan Enzler', 'stefan-enzler')], 'Bern', '00:56:48'),
+  row24(2, 'Addicted To Puzzles', [link('Birgit Warwas', 'birgit-warwas'), link('Jochen Baur', 'jochen-baur'), link('Yvonne Lehner-Grübel', 'yvonne-lehner-grubel'), link('Caroline Räth', 'caroline-rath')], 'Lindau', "00:59:19   +2' 31'' (at 2' 31'')"),
+  row24(3, 'Two Thousand Pieces And Some Breakdowns Later', [link('Paulina Schlinker', 'paulina-schlinker'), 'Janina Benn', link('Lara Geppert', 'lara-geppert'), 'Dorian Link'], '', "00:59:47   + 28'' (at 2' 59'')"),
+  row24(7, 'Teams10', [link('Nadine Herbst', 'nadine-herbst'), link('Serena Kilchenmann', 'serena-kilchenmann'), link('Jasmine Koira', 'jasmine-koira'), link('Rahel Stauber', 'rahel-stauber')], 'AR', "01:15:08   + 17'' (at 18' 20'')"),
+  row24(8, 'Die Vier Puzzletiere', ['Annette Sauter-Ott', 'Anja Kästle-Senfle', 'Carolin Lipp', 'Nadine Schieber'], 'Rosenheim', "01:17:58   +2' 50'' (at 21' 10'')"),
+  row24(10, 'Teams15', [link('Remo Theiler', 'remo-theiler'), 'Susan Schaffner', link('Pascale Theiler', 'pascale-theiler'), 'Richy Henseler'], 'AG', "01:27:53   +8' 47'' (at 31' 05')"),
+  row24(16, 'Teams17', ['Naline Spuler', 'Fabienne Kramer', link('Silja Costa', 'silja-costa'), 'Pablo Gutiérrez Ranera'], 'AG', "01:39:40   +3' 25'' (at 42' 52'')"),
+]
+const PAGE_2024 = (rows: string[]) => `<!doctype html><html><head><title>Classification SPM Schweizer Puzzle Meisterschaft 2024 - Teams</title>
+<link rel="canonical" href="https://worldjigsawpuzzle.org/schweizerpuzzlemeisterschaft/2024/teams/finale"></head><body>
+<h1>Classification Teams</h1><p>Qualifiying Round - Final</p><p>29/09/2024 14:30</p><div><span>1.000</span><span>02:00:00</span></div>
+<img src="https://worldjigsawpuzzle.org/users/img/puzzles/bb4b50fd.png" alt="Universo">
+<table><thead><tr><th>#</th><th>Name</th><th>Origin</th><th>Time</th><th></th><th></th></tr></thead><tbody>${rows.join('\n')}</tbody></table></body></html>`
+
+describe('SPM 2024 (Tabelle ohne Flaggen- und Länderspalte)', () => {
+  const res = parseWjpcHtml(PAGE_2024(ROWS_2024))
+  const by = (rank: number) => res.rows.find((r) => r.rank === rank)!
+
+  it('liest alle Zeilen ohne Warnung (der frühere Fehler «weder Zeit noch Teilezahl erkannt»)', () => {
+    expect(res.rows).toHaveLength(ROWS_2024.length)
+    expect(res.warnings).toEqual([])
+  })
+  it('Rang 1: Teamname und Zeit stimmen, «Bern» ist weder Name noch Mitglied', () => {
+    expect(by(1).entry_name).toBe('Once Upon A Puzzle')
+    expect(by(1).finish_seconds).toBe(3408)
+    expect(by(1).members.map((m) => m.name)).toEqual(['Patrick Inniger', 'Maria Golova', 'Letizia Pomes', 'Stefan Enzler'])
+    expect(by(1).members.map((m) => m.slug)).toEqual(['patrick-inniger', 'maria-golova', 'letizia-pomes', 'stefan-enzler'])
+    expect(by(1).country).toBeNull()
+  })
+  it('Zeiten mit Rückstand-Anhang, leere Herkunft, Kurzformen wie AR und AG', () => {
+    expect(by(2).finish_seconds).toBe(3559)
+    expect(by(3).members.map((m) => m.name)).toEqual(['Paulina Schlinker', 'Janina Benn', 'Lara Geppert', 'Dorian Link'])   // Herkunft leer
+    expect(by(7).members.at(-1)?.name).toBe('Rahel Stauber')                                                           // Herkunft «AR»
+    expect(by(10).members.at(-1)?.name).toBe('Richy Henseler')                                                         // Herkunft «AG»
+    expect(by(8).members.map((m) => m.slug)).toEqual([null, null, null, null])                                         // niemand verlinkt
+    expect(by(16).members.map((m) => m.name)).toEqual(['Naline Spuler', 'Fabienne Kramer', 'Silja Costa', 'Pablo Gutiérrez Ranera'])
+  })
+  it('liest Kopfdaten: Meisterschaft 2024, Puzzle «Universo», 1000 Teile, 2:00:00', () => {
+    expect(res.meta).toMatchObject({ eventName: 'SPM Schweizer Puzzle Meisterschaft 2024', eventYear: 2024, roundName: 'Finale', teamSize: 4, pieceCount: 1000, timeLimitSeconds: 7200, puzzleName: 'Universo' })
+  })
+})
+
+describe('Tabellenformen: Erkennung über den Inhalt, wenn Überschriften fehlen oder abweichen', () => {
+  it('Tabelle ohne Kopfzeile (nur td) wird über den Inhalt erkannt', () => {
+    const r = parseWjpcHtml(`<table><tbody>${ROWS_2024.slice(0, 3).join('')}</tbody></table>`)
+    expect(r.rows.map((x) => [x.rank, x.entry_name, x.finish_seconds])).toEqual([[1, 'Once Upon A Puzzle', 3408], [2, 'Addicted To Puzzles', 3559], [3, 'Two Thousand Pieces And Some Breakdowns Later', 3587]])
+  })
+  it('Tabelle mit anderen Überschriften (Rank/Name/Time) und einer Extra-Spalte', () => {
+    const html = `<table><thead><tr><th>Rank</th><th>Name</th><th>Time</th></tr></thead><tbody>
+      <tr><td>1</td><td><b>Team A</b> ${link('Anna A', 'anna-a')} / Bea B</td><td>00:50:00</td></tr>
+      <tr><td>2</td><td><b>Team B</b> Cora C / Dani D</td><td>412 Pieces</td></tr></tbody></table>`
+    const r = parseWjpcHtml(html)
+    expect(r.rows.map((x) => [x.rank, x.entry_name, x.status])).toEqual([[1, 'Team A', 'finished'], [2, 'Team B', 'unfinished']])
+    expect(r.rows[0].members.map((m) => m.name)).toEqual(['Anna A', 'Bea B'])
+  })
+  it('Kopfzeile hat weniger Spalten als die Daten: Zeit wird trotzdem gefunden', () => {
+    const html = `<table><thead><tr><th>#</th><th>Name</th><th>Origin</th></tr></thead><tbody>
+      <tr><td>1</td><td><b>Team A</b> Anna A / Bea B  Bern</td><td>Bern</td><td>00:50:00 +1' (at 1')</td></tr></tbody></table>`
+    const r = parseWjpcHtml(html)
+    expect(r.rows).toHaveLength(1)
+    expect(r.rows[0].finish_seconds).toBe(3000)
+  })
+  it('Herkunft wird nur als eigenes Wort abgeschnitten: «Rolf BAG» bleibt bei Herkunft «AG» erhalten', () => {
+    const html = `<table><thead><tr><th>#</th><th>Name</th><th>Origin</th><th>Time</th></tr></thead><tbody>
+      <tr><td>1</td><td><b>Team</b> Anna A / Rolf BAG</td><td>AG</td><td>00:50:00</td></tr></tbody></table>`
+    expect(parseWjpcHtml(html).rows[0].members.map((m) => m.name)).toEqual(['Anna A', 'Rolf BAG'])
+  })
+  it('Tabelle, deren Spalten nicht erkennbar sind, meldet das statt falsch zu lesen', () => {
+    const r = parseWjpcHtml('<table><tbody><tr><td>x</td><td>y</td><td>z</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></tbody></table>')
+    expect(r.rows).toEqual([])
+    expect(r.warnings.join(' ')).toContain('Spalten')
+  })
+})
+
+// SPM 2024, Einzel-Final: Person (verlinkt), optional Instagram-Link direkt dahinter, Herkunft mit Klammern
+describe('SPM 2024 Einzel (6 Spalten, Herkunft mit Kanton)', () => {
+  const insta = '<a href="https://www.instagram.com/swissspeedpuzzle/" title="Instagram">https://www.instagram.com/swissspeedpuzzle/</a>'
+  const solo = (rank: number, who: string, origin: string, time: string) => `<tr><td>${rank}</td><td>${who}   ${origin}</td><td>${origin}</td><td>${time}</td><td></td><td></td></tr>`
+  const html = `<html><head><title>Classification SPM Schweizer Puzzle Meisterschaft 2024 - Individual</title>
+    <link rel="canonical" href="https://worldjigsawpuzzle.org/schweizerpuzzlemeisterschaft/2024/individual/finale"></head><body>
+    <div><span>500</span><span>01:30:00</span></div><img src="https://worldjigsawpuzzle.org/users/img/puzzles/bc10e7fc.png" alt="Escritorio">
+    <table><thead><tr><th>#</th><th>Name</th><th>Origin</th><th>Time</th><th></th><th></th></tr></thead><tbody>
+    ${solo(1, link('Kristin Gall', 'kristin-gall'), 'Winterthur (ZH)', '00:43:07')}
+    ${solo(2, link('Helene Beutler', 'helene-beutler'), 'Bern (BE)', "00:43:21   + 14'' (at 14'')")}
+    ${solo(7, link('Patrick Inniger', 'patrick-inniger') + insta, 'Thun (BE)', "00:51:39   + 03' (at 8' 32'')")}
+    ${solo(28, link('Jochen Baur', 'jochen-baur'), 'Kohlberg (Baden-Württemberg)', "01:09:15   + 21'' (at 26' 08')")}
+    ${solo(40, 'Ohne Profil Person', 'Zürich (ZH)', '412 Pieces')}
+    </tbody></table></body></html>`
+  const r = parseWjpcHtml(html)
+  it('liest Personen als Einträge, ohne Herkunft und ohne Instagram-Adresse im Namen', () => {
+    expect(r.warnings).toEqual([])
+    expect(r.rows.map((x) => [x.rank, x.entry_name, x.members.length])).toEqual([[1, 'Kristin Gall', 1], [2, 'Helene Beutler', 1], [7, 'Patrick Inniger', 1], [28, 'Jochen Baur', 1], [40, 'Ohne Profil Person', 1]])
+    expect(r.rows[2].members[0].slug).toBe('patrick-inniger')
+    expect(r.rows[4].members[0].slug).toBeNull()
+    expect(r.rows[4]).toMatchObject({ status: 'unfinished', pieces_placed: 412 })
+  })
+  it('liest Kopfdaten: Einzel, 500 Teile, 1:30:00, Puzzle «Escritorio»', () => {
+    expect(r.meta).toMatchObject({ teamSize: 1, pieceCount: 500, timeLimitSeconds: 5400, puzzleName: 'Escritorio', eventYear: 2024, roundName: 'Finale' })
+  })
+})

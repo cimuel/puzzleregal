@@ -44,7 +44,7 @@ Zeilenregel, aber an der falschen Stelle. Seit 0005 sind nur `is_lendable` und `
 Test prüft die Spaltenrechte aller sensiblen Spalten direkt (`sensible_spalten_sind_per_spaltenrecht_gesperrt`).
 
 ## Bekannte Lücken (bewusst offen)
-- **Der Import ist auf den Aufbau der WJPC-Seite von Oktober 2026 abgestimmt.** Ändert WJPC das HTML, kann das Einlesen brechen. Die Vorschau zeigt das vor dem Import; CSV bleibt als Ersatz.
+- **Der Import ist auf den Aufbau der WJPC-Seiten von Oktober 2026 abgestimmt** (geprüft: SPM 2026 und 2024, Teams und Einzel). Die Tabellen sind je Meisterschaft verschieden aufgebaut; Land und Herkunft sind deshalb optional und die Spalten werden aus Überschriften und Inhalt erkannt. Paar-Seiten sind nicht an einer echten Seite geprüft. Ändert WJPC das HTML, kann das Einlesen brechen. Die Vorschau zeigt das vor dem Import; CSV bleibt als Ersatz.
 - Das Einfügen kopierter Tabellen aus der Zwischenablage ist nicht mit einem echten Browser geprüft. Die gespeicherte Seite ist der zuverlässigere Weg.
 - Es gibt keine Oberfläche, um einzelne Resultate zu bearbeiten (nur Runde ersetzen oder löschen).
 - Keine E-Mail-Benachrichtigung: Mitteilungen sieht man nur in der App (Zähler im Menü, Aktualisierung beim Öffnen, bei Fokus und jede Minute).

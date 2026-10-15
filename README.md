@@ -150,6 +150,10 @@ Wartende und gesperrte Konten sehen keine Puzzles, Zeiten oder Profile anderer.
 5. Meisterschaft, Jahr, Runde, Wettkampfart, Teilezahl und Zeitlimit sind aus der Seite vorbelegt. Das **Puzzle** wird vorgeschlagen, wenn es schon erfasst ist (sonst zuerst unter «Neues Puzzle erfassen» anlegen oder später auf der Rundenseite verknüpfen).
 6. **Importieren.** Vorhandene Resultate derselben Runde werden dabei ersetzt.
 
+**Unterstützte Tabellenformen** (mit echten Seiten geprüft): SPM 2026 (mit Flagge und Länderspalte) und SPM 2024 (nur «#», Name, Herkunft, Zeit), jeweils Teams und Einzel.
+Die Spalten werden aus den Überschriften und notfalls aus dem Inhalt erkannt. Zeigt die Vorschau etwas Falsches oder meldet «Spalten nicht erkannt», bleibt CSV als Ersatz.
+Das Format der Paar-Seiten ist noch nicht an einer echten Seite geprüft.
+
 **Zuordnung zu Mitgliedern:** automatisch über das WJPC-Profil (im eigenen Profil unter «Profil bearbeiten» eintragen) oder bei genau gleichem vollem Namen. Alles andere ordnest du auf der Rundenseite von Hand zu.
 
 ## Hypothetische Rangschätzung
