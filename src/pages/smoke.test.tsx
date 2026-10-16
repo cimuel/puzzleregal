@@ -10,7 +10,7 @@ const mock = vi.hoisted(() => ({ tables: {} as Record<string, { rows?: unknown[]
 vi.mock('../lib/supabase', () => {
   const builder = (table: string) => {
     const b: Record<string, unknown> = {}
-    for (const m of ['select', 'eq', 'order', 'insert', 'update', 'delete', 'is', 'in', 'limit']) b[m] = () => b
+    for (const m of ['select', 'eq', 'order', 'insert', 'update', 'delete', 'is', 'in', 'limit', 'range']) b[m] = () => b
     b.maybeSingle = () => Promise.resolve({ data: mock.tables[table]?.single ?? null, error: null })
     b.then = (res: (v: unknown) => unknown) => res({ data: mock.tables[table]?.rows ?? [], error: null })
     return b
@@ -20,6 +20,7 @@ vi.mock('../lib/supabase', () => {
       from: builder,
       rpc: (fn: string, args: unknown) => { mock.calls.push({ fn, args }); return Promise.resolve({ data: mock.rpc[fn] ?? [], error: null }) },
       storage: { from: () => ({ getPublicUrl: (p: string) => ({ data: { publicUrl: `https://x.test/${p}` } }) }) },
+      auth: { updateUser: (a: unknown) => { mock.calls.push({ fn: 'auth.updateUser', args: a }); return Promise.resolve({ error: mock.rpc.__updateError ? { message: String(mock.rpc.__updateError) } : null }) } },
     },
   }
 })
@@ -41,6 +42,7 @@ import { GuestShelf } from './GuestShelf'
 import { Championships } from './Championships'
 import { RoundResults } from './RoundResults'
 import { AdminImport } from './AdminImport'
+import { Admin } from './Admin'
 
 const wrap = (path: string, pattern: string, el: React.ReactElement) =>
   render(<MemoryRouter initialEntries={[path]}><Routes><Route path={pattern} element={el} /></Routes></MemoryRouter>)
@@ -429,5 +431,80 @@ describe('Import (Rauchtest)', () => {
     await userEvent.upload(input, new File(['<html><body>nichts</body></html>'], 'leer.html', { type: 'text/html' }))
     expect(await screen.findByText(/Keine Ergebniszeilen gefunden/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Resultate importieren/ })).toBeNull()
+  })
+})
+
+describe('Export (Rauchtest)', () => {
+  const captured: { blob?: Blob; name?: string } = {}
+  beforeEach(() => {
+    captured.blob = undefined; captured.name = undefined
+    URL.createObjectURL = vi.fn((b: Blob) => { captured.blob = b; return 'blob:test' })
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { captured.name = this.download })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('Profil: «Meine Zeiten» lädt eine CSV mit allen Versuchen herunter', async () => {
+    mock.rpc.player_attempts = [{ attempt_id: 'a2', solved_on: '2026-05-01', duration_seconds: 3000, piece_count: 1000, puzzle_id: 'p1', title: 'Alpenpanorama; mit Semikolon', kind: 'official', team_size: 1, ppm: '20.00' }]
+    wrap('/profil', '/profil', <PlayerProfile own />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Als CSV herunterladen' }))
+    await waitFor(() => expect(captured.blob).toBeTruthy())
+    expect(captured.name).toMatch(/^meine-puzzlezeiten-\d{4}-\d{2}-\d{2}\.csv$/)
+    const text = await captured.blob!.text()
+    expect(text).toContain('Datum;Puzzle;Teile;Zeit')
+    expect(text).toContain('"Alpenpanorama; mit Semikolon"')
+    expect(text).toContain('50:00;3000;20.00;offiziell;1')
+    expect(mock.calls.filter((c) => c.fn === 'player_attempts').some((c) => (c.args as { p_scope: string }).p_scope === 'all')).toBe(true)
+  })
+
+  it('Admin: Sicherung lädt eine JSON-Datei mit allen Tabellen und ohne Geheimnisse herunter', async () => {
+    mock.tables.profiles = { rows: [{ id: 'me', display_name: 'Anna', role: 'admin', status: 'approved', wjpc_slug: null, created_at: 'x' }] }
+    mock.tables.puzzles = { rows: [{ id: 'p1', title: 'Alpen', piece_count: 1000 }, { id: 'p2', title: 'Katzen', piece_count: 500 }] }
+    mock.rpc.my_loans = []
+    wrap('/admin', '/admin', <Admin />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sicherung herunterladen' }))
+    await waitFor(() => expect(captured.blob).toBeTruthy())
+    expect(captured.name).toMatch(/^puzzleregal-sicherung-\d{4}-\d{2}-\d{2}\.json$/)
+    const b = JSON.parse(await captured.blob!.text())
+    expect(b.format).toBe('puzzleregal-sicherung-1')
+    expect(Object.keys(b.tables).sort()).toEqual(['attempt_participants', 'attempts', 'copies', 'events', 'loans', 'official_result_members', 'official_results', 'ownership_history', 'profiles', 'puzzles', 'rounds'])
+    expect(b.counts.puzzles).toBe(2)
+    expect(b.counts.profiles).toBe(1)
+    expect(JSON.stringify(b)).not.toMatch(/email|invite|password/i)
+    expect(await screen.findByText(/Sicherung heruntergeladen/)).toBeTruthy()
+  })
+})
+
+describe('Passwort ändern (Rauchtest)', () => {
+  it('prüft Länge und Übereinstimmung, bevor etwas gesendet wird', async () => {
+    wrap('/profil', '/profil', <PlayerProfile own />)
+    const [a, b] = await screen.findAllByLabelText(/Neues Passwort/)
+    await userEvent.type(a, 'kurz'); await userEvent.type(b, 'kurz')
+    await userEvent.click(screen.getByRole('button', { name: 'Passwort ändern' }))
+    expect(await screen.findByText('Das Passwort braucht mindestens 8 Zeichen.')).toBeTruthy()
+    await userEvent.clear(a); await userEvent.clear(b)
+    await userEvent.type(a, 'langeslangespasswort'); await userEvent.type(b, 'anderesPasswort99')
+    await userEvent.click(screen.getByRole('button', { name: 'Passwort ändern' }))
+    expect(await screen.findByText('Die beiden Passwörter sind nicht gleich.')).toBeTruthy()
+    expect(mock.calls.find((c) => c.fn === 'auth.updateUser')).toBeUndefined()
+  })
+
+  it('sendet das neue Passwort und bestätigt', async () => {
+    wrap('/profil', '/profil', <PlayerProfile own />)
+    const [a, b] = await screen.findAllByLabelText(/Neues Passwort/)
+    await userEvent.type(a, 'langeslangespasswort'); await userEvent.type(b, 'langeslangespasswort')
+    await userEvent.click(screen.getByRole('button', { name: 'Passwort ändern' }))
+    expect(await screen.findByText('Das Passwort wurde geändert.')).toBeTruthy()
+    expect(mock.calls.find((c) => c.fn === 'auth.updateUser')!.args).toEqual({ password: 'langeslangespasswort' })
+  })
+
+  it('zeigt Fehler von Supabase verständlich', async () => {
+    mock.rpc.__updateError = 'New password should be different from the old password.'
+    wrap('/profil', '/profil', <PlayerProfile own />)
+    const [a, b] = await screen.findAllByLabelText(/Neues Passwort/)
+    await userEvent.type(a, 'langeslangespasswort'); await userEvent.type(b, 'langeslangespasswort')
+    await userEvent.click(screen.getByRole('button', { name: 'Passwort ändern' }))
+    expect(await screen.findByText('Das neue Passwort muss sich vom alten unterscheiden.')).toBeTruthy()
+    delete mock.rpc.__updateError
   })
 })

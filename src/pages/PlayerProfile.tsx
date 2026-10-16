@@ -8,7 +8,9 @@ import { useAsync } from '../hooks/useAsync'
 import { useMembers } from '../hooks/useMembers'
 import { Card, Spinner } from '../components/ui'
 import { Chip, ErrorBox, LineChart, ScopeToggle } from '../components/Parts'
-import { NameCard } from './Profile'
+import { NameCard, PasswordCard } from './Profile'
+import { attemptsToCsv, downloadText, todayStamp } from '../lib/export'
+import { Button } from '../components/ui'
 
 function Tile({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
@@ -31,6 +33,15 @@ export function PlayerProfile({ own = false }: { own?: boolean }) {
   const attempts = useAsync(() => (personId ? rpc<PlayerAttemptRow[]>('player_attempts', { p_profile: personId, p_scope: scope }) : Promise.resolve([])), [personId, scope])
 
   const official = useAsync(() => (personId ? rpc<OfficialResultRow[]>('player_official_results', { p_profile: personId }) : Promise.resolve([])), [personId])
+  const [exportError, setExportError] = useState<string | null>(null)
+  async function exportMine() {
+    if (!personId) return
+    try {
+      const all = await rpc<PlayerAttemptRow[]>('player_attempts', { p_profile: personId, p_scope: 'all' })
+      downloadText(`meine-puzzlezeiten-${todayStamp()}.csv`, attemptsToCsv(all), 'text/csv')
+      setExportError(null)
+    } catch (e) { setExportError(e instanceof Error ? e.message : 'Unbekannter Fehler.') }
+  }
   const name = own ? profile?.display_name : members.names.get(personId ?? '')
   const s = summary.data?.[0]
   const n = s?.attempts_count ?? 0
@@ -114,7 +125,15 @@ export function PlayerProfile({ own = false }: { own?: boolean }) {
               {r.puzzle_id && <> · <Link className="text-teal-dark underline" to={`/puzzle/${r.puzzle_id}`}>{r.puzzle_title}</Link></>}
             </li>))}</ul>
         </Card>)}
+      {own && (
+        <Card className="max-w-md">
+          <h2 className="mb-2 text-xl font-bold">Meine Zeiten exportieren</h2>
+          <p className="mb-3 text-sm text-ink-soft">Alle deine erfassten Versuche (auch Paar- und Teamzeiten) als CSV-Datei, zum Beispiel für Excel.</p>
+          <Button variant="secondary" onClick={exportMine}>Als CSV herunterladen</Button>
+          <ErrorBox message={exportError} />
+        </Card>)}
       {own && <NameCard />}
+      {own && <PasswordCard />}
     </div>
   )
 }

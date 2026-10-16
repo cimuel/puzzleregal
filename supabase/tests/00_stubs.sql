@@ -19,3 +19,7 @@ create function storage.foldername(name text) returns text[] language sql immuta
   $$ select string_to_array(name, '/') $$;
 grant usage on schema storage to authenticated, anon;
 grant select, insert, update, delete on storage.objects to authenticated;
+
+-- Wie in echtem Supabase: die System-Hilfsfunktionen sind ausdrücklich für die Rollen freigegeben
+grant execute on function auth.uid() to anon, authenticated;
+grant execute on function storage.foldername(text) to anon, authenticated;

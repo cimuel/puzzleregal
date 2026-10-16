@@ -7,6 +7,7 @@ import { Button, Card, Field, Notice, Spinner } from '../components/ui'
 import { Link } from 'react-router-dom'
 import { rpc, type LoanRow } from '../lib/api'
 import { LoanItem } from '../components/Loans'
+import { buildBackup, downloadText, todayStamp } from '../lib/export'
 import { isActive } from '../lib/loans'
 
 interface InviteCode {
@@ -33,6 +34,18 @@ export function Admin() {
   const [newCode, setNewCode] = useState<string | null>(null)
 
   const [loans, setLoans] = useState<LoanRow[] | null>(null)
+  const [backup, setBackup] = useState<{ busy: boolean; table?: string; done?: Record<string, number>; error?: string }>({ busy: false })
+
+  async function runBackup() {
+    setBackup({ busy: true })
+    try {
+      const b = await buildBackup((table) => setBackup({ busy: true, table }))
+      downloadText(`puzzleregal-sicherung-${todayStamp()}.json`, JSON.stringify(b, null, 1), 'application/json')
+      setBackup({ busy: false, done: b.counts })
+    } catch (e) {
+      setBackup({ busy: false, error: e instanceof Error ? e.message : 'Unbekannter Fehler.' })
+    }
+  }
   const load = useCallback(async () => {
     rpc<LoanRow[]>('my_loans', { p_all: true }).then(setLoans).catch((e: unknown) => setMsg({ kind: 'error', text: e instanceof Error ? e.message : 'Fehler' }))
     const [u, c] = await Promise.all([
@@ -130,6 +143,14 @@ export function Admin() {
             </li>
           ))}
         </ul>
+      </Card>
+
+      <Card>
+        <h2 className="mb-1 text-xl font-bold">Datensicherung</h2>
+        <p className="mb-3 max-w-prose text-sm text-ink-soft">Lädt alle Daten der App als Datei herunter: Puzzles, Exemplare, Ausleihen, Zeiten, Meisterschaften und Resultate. <strong>Nicht enthalten</strong> sind Passwörter, E-Mail-Adressen, Einladungscodes und die Foto-Dateien (nur ihre Pfade). Bewahre die Datei nicht in einem öffentlichen Ordner auf. Empfehlung: einmal im Monat sichern.</p>
+        <Button disabled={backup.busy} onClick={runBackup}>{backup.busy ? `Sichern … ${backup.table ?? ''}` : 'Sicherung herunterladen'}</Button>
+        {backup.error && <div className="mt-3"><Notice kind="error">{backup.error}</Notice></div>}
+        {backup.done && <div className="mt-3"><Notice kind="success">Sicherung heruntergeladen: {Object.entries(backup.done).map(([t, n]) => `${t} ${n}`).join(', ')}.</Notice></div>}
       </Card>
 
       <Card>

@@ -16,10 +16,11 @@ def run_file(conn, path):
 
 def setup():
     with psycopg.connect(DSN, autocommit=True) as conn:
+        conn.execute("alter default privileges grant execute on functions to public;")   # Ausgangszustand von PostgreSQL, damit jeder Lauf gleich startet
         conn.execute("drop schema if exists public cascade; create schema public;")
         conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql", "../migrations/0007_phase5_wettkampf.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql", "../migrations/0007_phase5_wettkampf.sql", "../migrations/0008_funktionsrechte.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -1094,6 +1095,88 @@ def runde_mit_puzzle_verknuepfen_nur_admin_und_teilezahl_muss_passen(c):
     call(c, adm, "admin_set_round_puzzle(%s, null)", rnd)
     assert c.sql("select puzzle_id from public.rounds where id=%s", rnd).fetchone()[0] is None
     c.as_(adm); raises(c, E.RaiseException, "select public.admin_set_round_puzzle(gen_random_uuid(), %s)", ok)
+
+# ---------------- Phase 6: Sicherheitsprüfung (audit.sql) und Funktionsrechte ----------------
+AUDIT_SQL = (ROOT.parent / "audit.sql").read_text()
+
+def audit(c):
+    c.conn.execute("reset role")
+    return c.conn.execute(AUDIT_SQL).fetchall()
+
+@test
+def audit_meldet_auf_dem_sollstand_keine_probleme(c):
+    assert audit(c) == [("OK", "Keine Probleme gefunden")], audit(c)
+
+@test
+def audit_erkennt_absichtlich_eingebaute_luecken(c):
+    cases = [
+        ("1 Zeilenregeln fehlen", "alter table public.puzzles disable row level security"),
+        ("2 Besucher (anon) haben Zugriff auf Tabellen", "grant select on public.profiles to anon"),
+        ("2 Besucher (anon) haben Zugriff auf Tabellen", "grant select (display_name) on public.profiles to anon"),
+        ("3 Besucher (anon) können Funktionen ausführen", "grant execute on function public._notify(uuid, text, jsonb) to anon"),
+        ("3 Besucher (anon) können Funktionen ausführen", "grant execute on function public.add_puzzle(text,text,text,integer,text,smallint,text,boolean,text,integer,text,smallint,text) to public"),
+        ("4 Interne Funktion für Mitglieder aufrufbar", "grant execute on function public._link_round(uuid,text,integer,text,smallint,text) to authenticated"),
+        ("5 Funktion ohne festen search_path", "create function public.unsicher() returns int language sql security definer as 'select 1'"),
+        ("6 Mitglieder können sensible Spalte ändern", "grant update (role) on public.profiles to authenticated"),
+        ("6 Mitglieder können sensible Spalte ändern", "grant update on public.copies to authenticated"),
+        ("7 Offene Zeilenregel (true)", "create policy offen on public.puzzles for select to authenticated using (true)"),
+        ("8 Registrierungs-Trigger fehlt", "drop trigger on_auth_user_created on auth.users"),
+        ("9 Foto-Bucket fehlt oder ist unbegrenzt", "update storage.buckets set file_size_limit = null"),
+        ("10 Foto-Speicher: Regeln fehlen", "drop policy puzzle_images_insert on storage.objects"),
+    ]
+    for expected, sql in cases:
+        c.conn.execute("savepoint m")
+        c.conn.execute(sql)
+        found = {r[0] for r in audit(c)}
+        assert expected in found, f"{sql!r} wurde nicht erkannt, gefunden: {found}"
+        c.conn.execute("rollback to savepoint m")
+    assert audit(c) == [("OK", "Keine Probleme gefunden")]
+
+@test
+def interne_funktionen_sind_fuer_besucher_und_mitglieder_wirklich_gesperrt(c):
+    anna = c.user("Anna"); p = c.puzzle(anna)
+    for role, uid in (("anon", None), ("authenticated", anna)):
+        c.as_(uid, role)
+        for call_sql in ("select public._notify(gen_random_uuid(), 'x', '{}'::jsonb)",
+                         "select public._loan_payload(gen_random_uuid())",
+                         "select public._link_round(%s, 'E', 2026, 'R', 1::smallint, null)"):
+            args = (p,) if "%s" in call_sql else ()
+            c.conn.execute("savepoint s")
+            try:
+                c.conn.execute(call_sql, args); raise AssertionError(f"{role} konnte {call_sql} ausführen")
+            except E.InsufficientPrivilege as e:
+                assert "permission denied for function" in str(e), str(e)     # echtes Recht fehlt, nicht nur eine Prüfung in der Funktion
+                c.conn.execute("rollback to savepoint s")
+
+@test
+def besucher_koennen_nur_ping_aufrufen(c):
+    anna = c.user("Anna"); neu = c.user("Neu", status="pending")
+    c.as_(None, "anon")
+    assert c.conn.execute("select public.ping()").fetchone()[0] is not None
+    for q in ("select public.is_approved()", "select * from public.puzzle_list()", "select public.request_loan(gen_random_uuid())",
+              "select * from public.guest_items()", "select * from public.rounds_overview()"):
+        c.conn.execute("savepoint s")
+        try:
+            c.conn.execute(q); raise AssertionError(f"anon konnte {q} ausführen")
+        except E.InsufficientPrivilege as e:
+            assert "permission denied for function" in str(e), str(e)
+            c.conn.execute("rollback to savepoint s")
+
+@test
+def neue_funktionen_sind_standardmaessig_nicht_fuer_alle_ausfuehrbar(c):
+    c.sql("create function public.test_neu() returns int language sql as 'select 1'")
+    assert c.sql("select has_function_privilege('anon', 'public.test_neu()'::regprocedure, 'EXECUTE')").fetchone()[0] is False
+    assert c.sql("select has_function_privilege('authenticated', 'public.test_neu()'::regprocedure, 'EXECUTE')").fetchone()[0] is False
+
+@test
+def mitglieder_koennen_alle_programmfunktionen_ausfuehren(c):
+    """Gegenprobe: die Korrektur darf nichts versehentlich sperren, was die App braucht."""
+    names = [r[0] for r in c.sql("""select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.prokind = 'f' and p.proname !~ '^_' and p.prorettype <> 'trigger'::regtype""").fetchall()]
+    assert len(names) >= 30, len(names)
+    for fn in names:
+        ok = c.sql("select bool_and(has_function_privilege('authenticated', p.oid, 'EXECUTE')) from pg_proc p where p.proname = %s and p.pronamespace = 'public'::regnamespace", fn).fetchone()[0]
+        assert ok, f"{fn} ist für Mitglieder gesperrt"
 
 if __name__ == "__main__":
     setup()

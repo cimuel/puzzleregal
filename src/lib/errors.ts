@@ -6,6 +6,10 @@ export function friendlyError(message: string | undefined | null): string {
     return 'Registrierung nicht möglich. Prüfe den Einladungscode und den Namen (mindestens 2 Zeichen).'
   if (m.includes('already registered') || m.includes('already been registered'))
     return 'Diese E-Mail-Adresse ist bereits registriert.'
+  if (m.includes('different from the old password') || m.includes('same password'))
+    return 'Das neue Passwort muss sich vom alten unterscheiden.'
+  if (m.includes('reauthentication') || m.includes('recently logged in'))
+    return 'Aus Sicherheitsgründen: bitte melde dich einmal ab und neu an, dann kannst du das Passwort ändern.'
   if (m.includes('puzzles_brand_product_no_key'))
     return 'Dieses Puzzle (gleiche Marke und Produktnummer) gibt es schon.'
   if (m.includes('invalid login credentials')) return 'E-Mail-Adresse oder Passwort stimmt nicht.'

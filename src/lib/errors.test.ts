@@ -20,6 +20,10 @@ describe('friendlyError', () => {
   it('erklärt doppelte Puzzles', () => {
     expect(friendlyError('duplicate key value violates unique constraint "puzzles_brand_product_no_key"')).toContain('gibt es schon')
   })
+  it('erklärt Fehler beim Ändern des Passworts', () => {
+    expect(friendlyError('New password should be different from the old password.')).toContain('unterscheiden')
+    expect(friendlyError('Password update requires reauthentication')).toContain('neu an')
+  })
   it('liefert bei leerer Meldung einen Standardtext', () => {
     expect(friendlyError(undefined)).toContain('Unbekannter Fehler')
   })

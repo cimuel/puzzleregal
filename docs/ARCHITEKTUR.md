@@ -1,4 +1,4 @@
-# Architektur und Entscheide (Stand Phase 5)
+# Architektur und Entscheide (Stand Phase 6)
 
 | Thema | Entscheid | Grund |
 |---|---|---|
@@ -42,6 +42,13 @@ Seit Phase 2 war auf `copies` das Recht «aktualisieren» für die ganze Tabelle
 Spaltenverbot ausgenommen. Das Spaltenverbot wirkte nicht. Verhindert wurde ein Fremdzugriff trotzdem durch die
 Zeilenregel, aber an der falschen Stelle. Seit 0005 sind nur `is_lendable` und `note` direkt schreibbar, und ein
 Test prüft die Spaltenrechte aller sensiblen Spalten direkt (`sensible_spalten_sind_per_spaltenrecht_gesperrt`).
+
+## Sicherheits-Korrektur in Migration 0008 (Funktionsrechte)
+PostgreSQL erlaubt neu erstellte Funktionen standardmässig für **alle**, auch für nicht angemeldete Besucher. Ein Entziehen nur im Schema `public`
+(Migration 0001) wirkt dafür nicht. Fast alle Funktionen prüften deshalb selbst die Anmeldung und wiesen Besucher ab, drei interne Hilfsfunktionen
+(`_notify`, `_link_round`, `_loan_payload`) aber nicht: Sie waren für Besucher aufrufbar. Seit 0008 sind alle Ausführungsrechte entzogen und gezielt neu vergeben
+(`ping()` für Besucher, Programmfunktionen für Mitglieder, interne Funktionen und Trigger für niemanden). Neue Funktionen sind standardmässig nicht ausführbar.
+`supabase/audit.sql` prüft das und weitere Punkte in der echten Datenbank und gehört nach jedem SQL-Update dazu.
 
 ## Bekannte Lücken (bewusst offen)
 - **Der Import ist auf den Aufbau der WJPC-Seiten von Oktober 2026 abgestimmt** (geprüft: SPM 2026 und 2024, Teams und Einzel). Die Tabellen sind je Meisterschaft verschieden aufgebaut; Land und Herkunft sind deshalb optional und die Spalten werden aus Überschriften und Inhalt erkannt. Paar-Seiten sind nicht an einer echten Seite geprüft. Ändert WJPC das HTML, kann das Einlesen brechen. Die Vorschau zeigt das vor dem Import; CSV bleibt als Ersatz.
