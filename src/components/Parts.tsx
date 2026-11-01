@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { imageUrl } from '../lib/image'
 import { formatDuration, formatInt, formatNumber, partsToSeconds } from '../lib/time'
 import type { PuzzleListRow } from '../lib/api'
+import { difficultyText } from '../lib/puzzles'
 
 export function PuzzleImage({ path, alt, className = '' }: { path: string | null | undefined; alt: string; className?: string }) {
   const url = imageUrl(path)
@@ -20,6 +21,18 @@ export function Chip({ children, tone = 'neutral' }: { children: React.ReactNode
   return <span className={`inline-block rounded-full border px-2.5 py-0.5 text-sm ${tones[tone]}`}>{children}</span>
 }
 
+/** Schwierigkeit als Punkte mit Text für Screenreader. Nichts bei fehlender Angabe. */
+export function Difficulty({ value }: { value: number | null | undefined }) {
+  if (!value) return null
+  return (
+    <span className="inline-flex items-center gap-1 text-sm text-ink-soft" title={`Schwierigkeit: ${difficultyText(value)}`}>
+      <span aria-hidden="true" className="tracking-wider text-mustard">{'●'.repeat(value)}<span className="text-line">{'●'.repeat(5 - value)}</span></span>
+      <span className="sr-only">Schwierigkeit {difficultyText(value)}</span>
+      <span aria-hidden="true">Schwierigkeit {value}/5</span>
+    </span>
+  )
+}
+
 export function PuzzleCard({ p }: { p: PuzzleListRow }) {
   return (
     <Link to={`/puzzle/${p.puzzle_id}`} className="group flex flex-col overflow-hidden rounded-xl border border-line bg-card hover:border-teal">
@@ -27,6 +40,7 @@ export function PuzzleCard({ p }: { p: PuzzleListRow }) {
       <div className="flex flex-1 flex-col gap-1 p-3">
         <h2 className="text-lg font-bold leading-tight group-hover:text-teal-dark">{p.title}</h2>
         <p className="text-ink-soft">{[p.brand, `${formatInt(p.piece_count)} Teile`].filter(Boolean).join(', ')}</p>
+        <Difficulty value={p.difficulty} />
         <p className="mt-auto pt-2 text-sm text-ink-soft">
           {p.copies_count} {p.copies_count === 1 ? 'Exemplar' : 'Exemplare'}, {p.solvers_count} {p.solvers_count === 1 ? 'Person hat' : 'Personen haben'} es gelöst
           {p.best_seconds !== null && <> · Bestzeit {formatDuration(p.best_seconds)}</>}

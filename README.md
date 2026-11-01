@@ -42,6 +42,8 @@ Der Schlüssel in `.env.production` ist der *öffentliche* Schlüssel und darf i
    | `0006_gaesteregal_gastausleihe.sql` | Gästeregal: Puzzles bei Gästen ohne Konto |
    | `0007_phase5_wettkampf.sql` | Import offizieller Resultate, Rangschätzung |
    | `0008_funktionsrechte.sql` | **Sicherheits-Korrektur:** Funktionen nur noch für angemeldete Mitglieder |
+   | `0009_puzzle_loeschen.sql` | Puzzles löschen (mit Schutz vor Datenverlust) |
+   | `0010_regal_schwierigkeit.sql` | Schwierigkeit in den Regalen (zum Sortieren) |
 
 3. **Authentication, Sign In / Providers, Email**: **Confirm email** ausschalten (der Standard-Mailversand erreicht nur Team-Adressen).
 4. **Authentication, URL Configuration**: *Site URL* auf `https://cimuel.github.io/puzzleregal/` setzen.

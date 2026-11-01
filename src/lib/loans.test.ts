@@ -26,7 +26,7 @@ describe('Mitteilungen', () => {
     expect(t).toBe('Corina möchte «Alpen» ausleihen. Nachricht: Für das Wochenende?')
   })
   it('kennt alle Typen und hat einen Standardtext', () => {
-    for (const type of ['loan_accepted', 'loan_declined', 'loan_cancelled', 'loan_handed_over', 'loan_return_requested', 'loan_returned', 'copy_transferred'])
+    for (const type of ['loan_accepted', 'loan_declined', 'loan_cancelled', 'loan_handed_over', 'loan_return_requested', 'loan_returned', 'copy_transferred', 'puzzle_deleted'])
       expect(notificationText({ type, payload: { puzzle_title: 'X', owner_name: 'A', borrower_name: 'B', from_name: 'C' } })).not.toBe('Neue Mitteilung.')
     expect(notificationText({ type: 'unbekannt', payload: {} })).toBe('Neue Mitteilung.')
   })

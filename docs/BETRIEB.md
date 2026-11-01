@@ -11,6 +11,12 @@
 3. Nach der Registrierung unter **Freigaben** auf **Freigeben** klicken.
 4. Wer nicht mehr mitmachen soll: **Sperren** (nicht löschen, damit Zeiten und Ausleihen erhalten bleiben).
 
+## Puzzles löschen (Admin)
+Auf der Puzzle-Seite **Löschen**. Als Admin kannst du auch Puzzles löschen, an denen Exemplare oder Zeiten anderer oder ein Ausleihverlauf hängen.
+Die App zeigt dann genau, was verschwindet, und verlangt ein Häkchen. Betroffene Besitzer und Personen mit laufender Ausleihe bekommen eine Mitteilung.
+**Nicht löschbar** ist ein Puzzle, das mit einer Meisterschaftsrunde verknüpft ist: Zuerst auf der Rundenseite «Verknüpfung lösen».
+**Mach vorher eine Sicherung** (Administration, Sicherung herunterladen), wenn viele Daten dranhängen. Gelöschtes lässt sich nicht zurückholen.
+
 ## Passwort vergessen
 «Passwort vergessen» per E-Mail geht nicht (der Standard-Mailversand von Supabase erreicht nur Adressen deines Supabase-Teams).
 **Weg für dich als Admin:** Im Supabase SQL Editor ausführen, mit der E-Mail-Adresse und einem neuen, zufälligen Passwort:

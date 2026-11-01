@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-const mock = vi.hoisted(() => ({ tables: {} as Record<string, { rows?: unknown[]; single?: unknown }>, rpc: {} as Record<string, unknown>, calls: [] as { fn: string; args: unknown }[] }))
+const mock = vi.hoisted(() => ({ tables: {} as Record<string, { rows?: unknown[]; single?: unknown }>, rpc: {} as Record<string, unknown>, calls: [] as { fn: string; args: unknown }[], role: 'member' as string }))
 
 vi.mock('../lib/supabase', () => {
   const builder = (table: string) => {
@@ -19,13 +19,13 @@ vi.mock('../lib/supabase', () => {
     supabase: {
       from: builder,
       rpc: (fn: string, args: unknown) => { mock.calls.push({ fn, args }); return Promise.resolve({ data: mock.rpc[fn] ?? [], error: null }) },
-      storage: { from: () => ({ getPublicUrl: (p: string) => ({ data: { publicUrl: `https://x.test/${p}` } }) }) },
+      storage: { from: () => ({ getPublicUrl: (p: string) => ({ data: { publicUrl: `https://x.test/${p}` } }), remove: (paths: string[]) => { mock.calls.push({ fn: 'storage.remove', args: paths }); return Promise.resolve({ error: null }) } }) },
       auth: { updateUser: (a: unknown) => { mock.calls.push({ fn: 'auth.updateUser', args: a }); return Promise.resolve({ error: mock.rpc.__updateError ? { message: String(mock.rpc.__updateError) } : null }) } },
     },
   }
 })
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'me', display_name: 'Anna', role: 'member', status: 'approved' }, session: {}, reloadProfile: async () => {} }),
+  useAuth: () => ({ profile: { id: 'me', display_name: 'Anna', role: mock.role, status: 'approved' }, session: {}, reloadProfile: async () => {} }),
 }))
 
 import { Puzzles } from './Puzzles'
@@ -82,6 +82,7 @@ beforeEach(() => {
     add_attempt: 'a9',
   }
   mock.calls = []
+  mock.role = 'member'
 })
 afterEach(cleanup)
 
@@ -257,7 +258,7 @@ describe('Ausleihe (Rauchtest)', () => {
 
 const shelfRow = (o: Record<string, unknown>) => ({ copy_id: 'c1', puzzle_id: 'p1', title: 'Alpenpanorama', brand: null, product_no: null, piece_count: 1000, image_path: null,
   owner_id: 'me', owner_name: 'Anna', holder_id: 'me', holder_name: 'Anna', is_on_loan: false, is_reserved: false, is_lendable: true, best_seconds: null, attempts_count: 0,
-  is_with_guest: false, guest_name: null, guest_since: null, ...o })
+  is_with_guest: false, guest_name: null, guest_since: null, difficulty: null, ...o })
 
 describe('Gästeregal (Rauchtest)', () => {
   it('eigenes Regal: Puzzle an einen Gast eintragen sendet Exemplar und Name', async () => {
@@ -506,5 +507,105 @@ describe('Passwort ändern (Rauchtest)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Passwort ändern' }))
     expect(await screen.findByText('Das neue Passwort muss sich vom alten unterscheiden.')).toBeTruthy()
     delete mock.rpc.__updateError
+  })
+})
+
+const delInfo = (o: Record<string, unknown>) => [{ can_delete: true, needs_admin_force: false, block_reason: null, copies_count: 1, other_copies_count: 0, attempts_count: 2, other_attempts_count: 0, loans_count: 0, rounds_count: 0, title: 'Alpenpanorama', ...o }]
+
+describe('Puzzle löschen (Rauchtest)', () => {
+  it('eigenes Puzzle: zeigt, was gelöscht wird, löscht erst nach «Endgültig löschen» und räumt das Foto auf', async () => {
+    mock.rpc.puzzle_delete_info = delInfo({})
+    mock.rpc.delete_puzzle = 'me/bild.webp'
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Löschen' }))
+    expect(await screen.findByText(/1 Exemplar und 2 erfasste Zeiten werden mit gelöscht/)).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: /Ich weiss/ })).toBeNull()
+    expect(mock.calls.find((c) => c.fn === 'delete_puzzle')).toBeUndefined()           // noch nichts gelöscht
+    await userEvent.click(screen.getByRole('button', { name: 'Endgültig löschen' }))
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'delete_puzzle')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'delete_puzzle')!.args).toEqual({ p_puzzle: 'p1', p_with_foreign_data: false })
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'storage.remove')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'storage.remove')!.args).toEqual(['me/bild.webp'])
+  })
+
+  it('Admin mit fremden Daten: Löschen erst nach ausdrücklicher Bestätigung', async () => {
+    mock.role = 'admin'
+    mock.rpc.puzzle_delete_info = delInfo({ needs_admin_force: true, copies_count: 2, other_copies_count: 1, attempts_count: 3, other_attempts_count: 2 })
+    mock.rpc.delete_puzzle = ''
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Löschen' }))
+    expect(await screen.findByText(/Davon gehören 1 Exemplar und 2 Zeiten anderen Personen/)).toBeTruthy()
+    const btn = screen.getByRole('button', { name: 'Endgültig löschen' }) as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    await userEvent.click(screen.getByRole('checkbox', { name: /Ich weiss/ }))
+    expect(btn.disabled).toBe(false)
+    await userEvent.click(btn)
+    await waitFor(() => expect(mock.calls.find((c) => c.fn === 'delete_puzzle')).toBeTruthy())
+    expect(mock.calls.find((c) => c.fn === 'delete_puzzle')!.args).toEqual({ p_puzzle: 'p1', p_with_foreign_data: true })
+    expect(mock.calls.find((c) => c.fn === 'storage.remove')).toBeUndefined()           // kein Foto vorhanden
+  })
+
+  it('Gesperrt: zeigt den Grund und bietet kein Löschen an', async () => {
+    mock.rpc.puzzle_delete_info = delInfo({ can_delete: false, block_reason: 'has_rounds' })
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Löschen' }))
+    expect(await screen.findByText(/mit einer Meisterschaftsrunde verknüpft/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Endgültig löschen' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Schliessen' }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('Abbrechen löscht nichts', async () => {
+    mock.rpc.puzzle_delete_info = delInfo({})
+    wrap('/puzzle/p1', '/puzzle/:id', <PuzzleDetail />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Löschen' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Abbrechen' }))
+    expect(mock.calls.find((c) => c.fn === 'delete_puzzle')).toBeUndefined()
+  })
+})
+
+describe('Schwierigkeit sortieren (Rauchtest)', () => {
+  const puzzles = [
+    { puzzle_id: 'p1', title: 'Mittel', brand: null, product_no: null, piece_count: 500, image_path: null, difficulty: 3, copies_count: 1, solvers_count: 0, best_seconds: null },
+    { puzzle_id: 'p2', title: 'Ohne Angabe', brand: null, product_no: null, piece_count: 1000, image_path: null, difficulty: null, copies_count: 1, solvers_count: 0, best_seconds: null },
+    { puzzle_id: 'p3', title: 'Schwer', brand: null, product_no: null, piece_count: 2000, image_path: null, difficulty: 5, copies_count: 1, solvers_count: 0, best_seconds: null },
+    { puzzle_id: 'p4', title: 'Leicht', brand: null, product_no: null, piece_count: 300, image_path: null, difficulty: 1, copies_count: 1, solvers_count: 0, best_seconds: null },
+  ]
+  const titles = () => screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+
+  it('Alle Puzzles: leicht zuerst, schwer zuerst, Puzzles ohne Angabe am Ende, und Filter', async () => {
+    mock.rpc.puzzle_list = puzzles
+    wrap('/puzzles', '/puzzles', <Puzzles />)
+    await screen.findByText('Mittel')
+    await userEvent.selectOptions(screen.getByLabelText('Sortierung'), 'difficulty-asc')
+    await waitFor(() => expect(titles()).toEqual(['Leicht', 'Mittel', 'Schwer', 'Ohne Angabe']))
+    await userEvent.selectOptions(screen.getByLabelText('Sortierung'), 'difficulty-desc')
+    await waitFor(() => expect(titles()).toEqual(['Schwer', 'Mittel', 'Leicht', 'Ohne Angabe']))
+    await userEvent.selectOptions(screen.getByLabelText('Schwierigkeit'), '3')
+    await waitFor(() => expect(titles()).toEqual(['Mittel']))
+    await userEvent.selectOptions(screen.getByLabelText('Schwierigkeit'), 'none')
+    await waitFor(() => expect(titles()).toEqual(['Ohne Angabe']))
+  })
+
+  it('Alle Puzzles: Karten zeigen die Schwierigkeit', async () => {
+    mock.rpc.puzzle_list = puzzles
+    wrap('/puzzles', '/puzzles', <Puzzles />)
+    expect(await screen.findByText('Schwierigkeit 5/5')).toBeTruthy()
+    expect(screen.getByText('Schwierigkeit 3/5')).toBeTruthy()
+    expect(screen.getAllByText(/Schwierigkeit/).length).toBeGreaterThanOrEqual(3)     // das Puzzle ohne Angabe zeigt nichts
+  })
+
+  it('Regal: nach Schwierigkeit sortieren', async () => {
+    mock.rpc.shelf_items = [
+      shelfRow({ copy_id: 'c1', title: 'Mittel', piece_count: 500, difficulty: 3 }), shelfRow({ copy_id: 'c2', title: 'Ohne', piece_count: 300, difficulty: null }),
+      shelfRow({ copy_id: 'c3', title: 'Schwer', piece_count: 2000, difficulty: 5 }), shelfRow({ copy_id: 'c4', title: 'Leicht', piece_count: 1000, difficulty: 1 }),
+    ]
+    wrap('/mein-regal', '/mein-regal', <Shelf own />)
+    await screen.findByText('Mittel')
+    expect(titles()).toEqual(['Ohne', 'Mittel', 'Leicht', 'Schwer'])           // Standard: nach Teilen
+    await userEvent.selectOptions(screen.getByLabelText('Sortierung'), 'difficulty-asc')
+    await waitFor(() => expect(titles()).toEqual(['Leicht', 'Mittel', 'Schwer', 'Ohne']))
+    await userEvent.selectOptions(screen.getByLabelText('Sortierung'), 'difficulty-desc')
+    await waitFor(() => expect(titles()).toEqual(['Schwer', 'Mittel', 'Leicht', 'Ohne']))
   })
 })

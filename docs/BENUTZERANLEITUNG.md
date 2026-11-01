@@ -9,6 +9,18 @@
 **Neues Puzzle erfassen**: Foto, Titel, Teile, Marke und Produktnummer. Die App warnt, wenn es das Puzzle schon gibt. Dann fügst du nur dein Exemplar hinzu.
 Haken bei «Ich besitze dieses Puzzle», damit es in deinem Regal steht.
 
+## Puzzles finden und sortieren
+In **Alle Puzzles** und in jedem **Regal** sortierst du nach Name, Teilen, **Schwierigkeit** (leicht oder schwer zuerst), Zeit, Marke oder Verfügbarkeit.
+In **Alle Puzzles** kannst du auch nach einer Schwierigkeit filtern. Puzzles ohne Angabe stehen beim Sortieren am Ende.
+Die Schwierigkeit (1 bis 5) trägst du beim Erfassen oder unter **Bearbeiten** ein.
+
+## Ein Puzzle löschen
+Auf der Puzzle-Seite neben **Zeit erfassen** und **Bearbeiten** steht **Löschen**, wenn du das Puzzle erfasst hast. Die App zeigt zuerst, was gelöscht würde.
+- Es geht direkt, wenn nur **deine** Exemplare und Zeiten daran hängen. Das Foto wird mit entfernt.
+- Hängen Exemplare oder Zeiten **anderer** daran, oder gibt es Ausleihen, kann nur ein **Admin** löschen.
+- Ist das Puzzle mit einer **Meisterschaft** verknüpft, geht es nicht. Ein Admin löst zuerst die Verknüpfung.
+- Gelöscht ist endgültig. Falls du nur den Titel falsch geschrieben hast, nimm **Bearbeiten**.
+
 ## Eine Zeit erfassen
 **Neuen Versuch erfassen**: Puzzle wählen, Datum, Zeit (Stunden, Minuten, Sekunden), privat oder Wettkampf.
 Zu zweit oder im Team wählst du, wer dabei war. Paar- und Teamzeiten zählen nicht in deine Einzelstatistik.

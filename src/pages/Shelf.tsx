@@ -3,16 +3,17 @@ import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { rpc, type ShelfRow } from '../lib/api'
 import { formatDuration, formatInt } from '../lib/time'
+import { compareDifficulty } from '../lib/puzzles'
 import { useAsync } from '../hooks/useAsync'
 import { useMembers } from '../hooks/useMembers'
 import { supabase } from '../lib/supabase'
 import { friendlyError } from '../lib/errors'
 import { useMyLoans } from '../hooks/useMyLoans'
 import { Button, Spinner } from '../components/ui'
-import { Chip, ErrorBox, PuzzleImage } from '../components/Parts'
+import { Chip, Difficulty, ErrorBox, PuzzleImage } from '../components/Parts'
 import { RequestLoan } from '../components/Loans'
 
-const sorts = [['pieces', 'Anzahl Teile'], ['time', 'Beste Lösungszeit'], ['brand', 'Marke'], ['availability', 'Verfügbarkeit']] as const
+const sorts = [['pieces', 'Anzahl Teile'], ['difficulty-asc', 'Schwierigkeit: leicht zuerst'], ['difficulty-desc', 'Schwierigkeit: schwer zuerst'], ['time', 'Beste Lösungszeit'], ['brand', 'Marke'], ['availability', 'Verfügbarkeit']] as const
 
 function OwnCopyTools({ row, members, onChange }: { row: ShelfRow; members: { id: string; display_name: string }[]; onChange: () => void }) {
   const [to, setTo] = useState('')
@@ -77,6 +78,8 @@ export function Shelf({ own = false }: { own?: boolean }) {
     const byPieces = (a: ShelfRow, b: ShelfRow) => a.piece_count - b.piece_count || a.title.localeCompare(b.title, 'de')
     const cmp = {
       pieces: byPieces,
+      'difficulty-asc': (a: ShelfRow, b: ShelfRow) => compareDifficulty(a.difficulty, b.difficulty, 'asc') || byPieces(a, b),
+      'difficulty-desc': (a: ShelfRow, b: ShelfRow) => compareDifficulty(a.difficulty, b.difficulty, 'desc') || byPieces(a, b),
       time: (a: ShelfRow, b: ShelfRow) => (a.best_seconds ?? Infinity) - (b.best_seconds ?? Infinity) || byPieces(a, b),
       brand: (a: ShelfRow, b: ShelfRow) => (a.brand ?? '\uffff').localeCompare(b.brand ?? '\uffff', 'de') || byPieces(a, b),
       availability: (a: ShelfRow, b: ShelfRow) => Number(a.is_on_loan) - Number(b.is_on_loan) || Number(b.is_lendable) - Number(a.is_lendable) || byPieces(a, b),
@@ -108,6 +111,7 @@ export function Shelf({ own = false }: { own?: boolean }) {
                 <div className="flex flex-1 flex-col gap-2 p-3">
                   <h2 className="text-lg font-bold leading-tight"><Link to={`/puzzle/${r.puzzle_id}`} className="hover:text-teal-dark">{r.title}</Link></h2>
                   <p className="text-ink-soft">{[r.brand, `${formatInt(r.piece_count)} Teile`].filter(Boolean).join(', ')}</p>
+                  <Difficulty value={r.difficulty} />
                   <p className="text-sm">Beste Zeit {name ? `von ${name}` : ''}: <strong>{formatDuration(r.best_seconds)}</strong> · {r.attempts_count} {r.attempts_count === 1 ? 'Versuch' : 'Versuche'}</p>
                   <div className="mt-auto flex flex-wrap gap-2 pt-1">
                     {r.is_with_guest ? <Chip tone="warn">bei Gast{r.guest_name ? ` (${r.guest_name})` : ''}</Chip> : borrowed ? <Chip tone="warn">ausgeliehen von {r.owner_name}</Chip> : r.is_on_loan ? <Chip tone="warn">ausgeliehen an {r.holder_name}</Chip> : r.is_reserved ? <Chip tone="warn">reserviert</Chip> : <Chip tone="good">zu Hause</Chip>}

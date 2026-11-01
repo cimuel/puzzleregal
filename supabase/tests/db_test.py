@@ -20,7 +20,7 @@ def setup():
         conn.execute("drop schema if exists public cascade; create schema public;")
         conn.execute("drop schema if exists auth cascade; drop schema if exists storage cascade; drop schema if exists extensions cascade;")
         conn.execute("drop role if exists anon; drop role if exists authenticated;")
-        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql", "../migrations/0007_phase5_wettkampf.sql", "../migrations/0008_funktionsrechte.sql"]:
+        for f in ["00_stubs.sql", "../migrations/0001_schema.sql", "../migrations/0002_storage.sql", "../migrations/0003_phase3_kernfunktionen.sql", "../migrations/0004_phase4_ausleihe.sql", "../migrations/0005_gaesteregal.sql", "../migrations/0006_gaesteregal_gastausleihe.sql", "../migrations/0007_phase5_wettkampf.sql", "../migrations/0008_funktionsrechte.sql", "../migrations/0009_puzzle_loeschen.sql", "../migrations/0010_regal_schwierigkeit.sql"]:
             run_file(conn, ROOT / f)
 
 class Ctx:
@@ -1177,6 +1177,115 @@ def mitglieder_koennen_alle_programmfunktionen_ausfuehren(c):
     for fn in names:
         ok = c.sql("select bool_and(has_function_privilege('authenticated', p.oid, 'EXECUTE')) from pg_proc p where p.proname = %s and p.pronamespace = 'public'::regnamespace", fn).fetchone()[0]
         assert ok, f"{fn} ist für Mitglieder gesperrt"
+
+# ---------------- Puzzle löschen ----------------
+def info(c, uid, pz):
+    c.as_(uid)
+    return c.conn.execute("select can_delete, needs_admin_force, block_reason, copies_count, other_copies_count, attempts_count, other_attempts_count, loans_count, rounds_count from public.puzzle_delete_info(%s)", (pz,)).fetchone()
+
+@test
+def eigenes_puzzle_ohne_fremde_daten_ist_loeschbar(c):
+    anna = c.user("Anna"); pz = c.puzzle(anna, title="Test", pieces=500); c.copy(pz, anna); c.attempt(anna, pz, 3000)
+    assert info(c, anna, pz) == (True, False, None, 1, 0, 1, 0, 0, 0)
+    c.sql("update public.puzzles set image_path=%s where id=%s", f"{anna}/bild.webp", pz)
+    assert call(c, anna, "delete_puzzle(%s)", pz) == f"{anna}/bild.webp"
+    for table in ("puzzles", "copies", "attempts", "attempt_participants", "ownership_history"):
+        assert c.sql(f"select count(*) from public.{table}").fetchone()[0] == 0, table
+
+@test
+def puzzle_loeschen_nur_ersteller_oder_admin(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); adm = c.user("Adm", role="admin"); pz = c.puzzle(anna)
+    assert info(c, bea, pz)[:3] == (False, False, "not_allowed")
+    c.as_(bea); raises(c, E.InsufficientPrivilege, "select public.delete_puzzle(%s)", pz)
+    assert info(c, adm, pz)[0] is True
+    call(c, adm, "delete_puzzle(%s)", pz)
+    assert c.sql("select count(*) from public.puzzles").fetchone()[0] == 0
+
+@test
+def fremde_exemplare_oder_zeiten_blockieren_normale_nutzer_und_erlauben_admin_mit_bestaetigung(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); adm = c.user("Adm", role="admin")
+    pz = c.puzzle(anna); c.copy(pz, anna); c.copy(pz, bea); c.attempt(bea, pz, 3000); c.attempt(anna, pz, 2900)
+    r = info(c, anna, pz)
+    assert r[:3] == (False, False, "foreign_data") and r[3:7] == (2, 1, 2, 1), r
+    c.as_(anna); raises(c, E.RaiseException, "select public.delete_puzzle(%s)", pz)
+    c.as_(anna); raises(c, E.RaiseException, "select public.delete_puzzle(%s, true)", pz)      # Bestätigung allein genügt für Nicht-Admins nicht
+    r = info(c, adm, pz); assert r[:3] == (True, True, None)
+    c.as_(adm); raises(c, E.RaiseException, "select public.delete_puzzle(%s)", pz)             # ohne ausdrückliche Bestätigung nicht
+    assert c.sql("select count(*) from public.puzzles").fetchone()[0] == 1
+    call(c, adm, "delete_puzzle(%s, true)", pz)
+    assert c.sql("select count(*) from public.puzzles").fetchone()[0] == 0
+    assert c.sql("select count(*) from public.attempts").fetchone()[0] == 0
+    c.as_(bea)
+    n = c.conn.execute("select type, payload->>'puzzle_title', payload->>'from_name' from public.notifications").fetchall()
+    assert n == [("puzzle_deleted", "Alpen", "Adm")], n                                         # die Besitzerin des fremden Exemplars wird informiert
+
+@test
+def teamzeit_mit_anderen_personen_zaehlt_als_fremde_daten(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); pz = c.puzzle(anna); c.attempt(anna, pz, 3000, team=4, parts=[anna, bea])
+    assert info(c, anna, pz)[:3] == (False, False, "foreign_data")
+
+@test
+def ausleihverlauf_sperrt_normale_nutzer_admin_loescht_mit_bestaetigung_und_benachrichtigt(c):
+    owner, bor, other, pz, cp = loan_setup(c); adm = c.user("Adm", role="admin")
+    loan = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, false)", loan)      # abgelehnt, aber im Verlauf
+    assert info(c, owner, pz)[:3] == (False, False, "has_loans")
+    c.as_(owner); raises(c, E.RaiseException, "select public.delete_puzzle(%s)", pz)
+    r = info(c, adm, pz); assert r[:3] == (True, True, None) and r[7] == 1, r
+    c.as_(adm); raises(c, E.RaiseException, "select public.delete_puzzle(%s)", pz)                    # ohne Bestätigung nicht
+    call(c, adm, "delete_puzzle(%s, true)", pz)
+    assert c.sql("select count(*) from public.loans").fetchone()[0] == 0
+    assert c.sql("select count(*) from public.puzzles").fetchone()[0] == 0
+
+@test
+def laufende_ausleihe_benachrichtigt_ausleihende_beim_admin_loeschen(c):
+    owner, bor, other, pz, cp = loan_setup(c); adm = c.user("Adm", role="admin")
+    loan = call(c, bor, "request_loan(%s)", cp); call(c, owner, "respond_loan(%s, true)", loan); call(c, owner, "confirm_handover(%s)", loan)
+    call(c, adm, "delete_puzzle(%s, true)", pz)
+    for uid in (owner, bor):
+        c.as_(uid)
+        assert "puzzle_deleted" in [r[0] for r in c.conn.execute("select type from public.notifications").fetchall()], uid
+    c.as_(other); assert c.conn.execute("select count(*) from public.notifications where type='puzzle_deleted'").fetchone()[0] == 0
+
+@test
+def meisterschaftsverknuepfung_verhindert_das_loeschen_auch_fuer_admins(c):
+    anna = c.user("Anna"); adm = c.user("Adm", role="admin")
+    pz2 = c.puzzle(anna, title="Zwei", no="2", brand="Heye", pieces=1000)
+    rnd = ensure_round(c, adm, pz2)
+    assert info(c, anna, pz2)[:3] == (False, False, "has_rounds")
+    assert info(c, adm, pz2)[:3] == (False, False, "has_rounds")
+    c.as_(anna); raises(c, E.RaiseException, "select public.delete_puzzle(%s)", pz2)
+    c.as_(adm); raises(c, E.RaiseException, "select public.delete_puzzle(%s, true)", pz2)
+    call(c, adm, "admin_set_round_puzzle(%s, null)", rnd)
+    call(c, anna, "delete_puzzle(%s)", pz2)                                                           # nach dem Lösen der Verknüpfung möglich
+
+@test
+def loeschen_nur_fuer_freigegebene_und_nicht_anonym(c):
+    anna = c.user("Anna"); neu = c.user("Neu", status="pending"); pz = c.puzzle(anna)
+    c.as_(neu); raises(c, E.InsufficientPrivilege, "select public.delete_puzzle(%s)", pz)
+    raises(c, E.InsufficientPrivilege, "select * from public.puzzle_delete_info(%s)", pz)
+    c.as_(None, "anon"); raises(c, E.InsufficientPrivilege, "select public.delete_puzzle(%s)", pz)
+    c.as_(anna); raises(c, E.RaiseException, "select public.delete_puzzle(gen_random_uuid())")
+
+@test
+def loeschen_ist_atomar_bei_fehler_bleibt_alles_erhalten(c):
+    anna = c.user("Anna"); bea = c.user("Bea"); pz = c.puzzle(anna); c.copy(pz, anna); c.attempt(anna, pz, 3000); c.copy(pz, bea)
+    c.as_(anna)
+    c.conn.execute("savepoint s")
+    try:
+        c.conn.execute("select public.delete_puzzle(%s)", (pz,)); raise AssertionError("keine Ausnahme")
+    except E.RaiseException:
+        c.conn.execute("rollback to savepoint s")
+    assert c.sql("select count(*) from public.copies where puzzle_id=%s", pz).fetchone()[0] == 2
+    assert c.sql("select count(*) from public.attempts where puzzle_id=%s", pz).fetchone()[0] == 1
+
+@test
+def regal_liefert_die_schwierigkeit_der_puzzles(c):
+    anna = c.user("Anna"); a = c.puzzle(anna, title="Leicht", no="1", pieces=500); b = c.puzzle(anna, title="Schwer", no="2", pieces=1000); n = c.puzzle(anna, title="Ohne", no="3", pieces=300)
+    c.sql("update public.puzzles set difficulty=1 where id=%s", a); c.sql("update public.puzzles set difficulty=5 where id=%s", b)
+    for pz in (a, b, n): c.copy(pz, anna)
+    c.as_(anna)
+    rows = c.conn.execute("select title, difficulty from public.shelf_items(%s)", (anna,)).fetchall()
+    assert dict(rows) == {"Leicht": 1, "Schwer": 5, "Ohne": None}, rows
 
 if __name__ == "__main__":
     setup()

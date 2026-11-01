@@ -11,6 +11,8 @@ import { Button, Card, Field, Spinner } from '../components/ui'
 import { Chip, ErrorBox, PuzzleImage } from '../components/Parts'
 import { RequestLoan } from '../components/Loans'
 import { RankEstimate } from '../components/RankEstimate'
+import { DeletePuzzle } from '../components/DeletePuzzle'
+import { difficultyText } from '../lib/puzzles'
 import { useMyLoans } from '../hooks/useMyLoans'
 
 interface CopyRow { id: string; owner_id: string; is_lendable: boolean; holder_id: string; is_on_loan: boolean; is_reserved: boolean; guest_name: string | null; is_with_guest: boolean }
@@ -99,7 +101,7 @@ export function PuzzleDetail() {
             <dt className="text-ink-soft">Teile</dt><dd>{formatInt(p.piece_count)}</dd>
             {p.brand && <><dt className="text-ink-soft">Marke</dt><dd>{p.brand}</dd></>}
             {p.product_no && <><dt className="text-ink-soft">Produktnummer</dt><dd>{p.product_no}</dd></>}
-            {p.difficulty && <><dt className="text-ink-soft">Schwierigkeit</dt><dd>{p.difficulty} von 5</dd></>}
+            {p.difficulty && <><dt className="text-ink-soft">Schwierigkeit</dt><dd>{difficultyText(p.difficulty)}</dd></>}
             {p.notes && <><dt className="text-ink-soft">Notizen</dt><dd className="whitespace-pre-line">{p.notes}</dd></>}
             <dt className="text-ink-soft">Erfasst von</dt><dd>{members.names.get(p.created_by) ?? '–'}</dd>
           </dl>
@@ -107,6 +109,7 @@ export function PuzzleDetail() {
             <Link to={`/versuch-neu?puzzle=${p.id}`} className="inline-flex min-h-11 items-center rounded-lg bg-teal px-4 font-semibold text-white hover:bg-teal-dark">Zeit erfassen</Link>
             {!iOwn && <Button variant="secondary" onClick={addCopy}>Ich besitze dieses Puzzle auch</Button>}
             {canEdit && <Button variant="secondary" onClick={() => navigate(`/puzzle/${p.id}/bearbeiten`)}>Bearbeiten</Button>}
+            {canEdit && <DeletePuzzle puzzleId={p.id} onDeleted={() => navigate('/puzzles')} />}
           </div>
         </div>
       </div>

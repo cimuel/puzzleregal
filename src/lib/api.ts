@@ -48,7 +48,7 @@ export interface ShelfRow {
   piece_count: number; image_path: string | null; owner_id: string; owner_name: string
   holder_id: string; holder_name: string; is_on_loan: boolean; is_lendable: boolean
   best_seconds: number | null; attempts_count: number; is_reserved: boolean
-  is_with_guest: boolean; guest_name: string | null; guest_since: string | null
+  is_with_guest: boolean; guest_name: string | null; guest_since: string | null; difficulty: number | null
 }
 export interface MemberRow {
   profile_id: string; display_name: string; copies_owned: number; copies_held: number
@@ -97,4 +97,11 @@ export interface RoundResultRow {
   id: string; rank: number; entry_name: string; country: string | null; status: 'finished' | 'unfinished'
   finish_seconds: number | null; pieces_placed: number | null; fetched_at: string
   official_result_members: { id: string; member_name: string; wjpc_slug: string | null; profile_id: string | null }[]
+}
+
+export type DeleteBlock = 'not_allowed' | 'has_loans' | 'has_rounds' | 'foreign_data' | null
+export interface DeleteInfoRow {
+  can_delete: boolean; needs_admin_force: boolean; block_reason: DeleteBlock
+  copies_count: number; other_copies_count: number; attempts_count: number; other_attempts_count: number
+  loans_count: number; rounds_count: number; title: string
 }

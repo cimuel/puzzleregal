@@ -35,6 +35,7 @@ export function notificationText(n: Pick<NotificationRow, 'type' | 'payload'>): 
     case 'loan_handed_over': return `Die Übergabe von ${t} wurde bestätigt. Das Puzzle ist jetzt in deinem Regal.`
     case 'loan_return_requested': return `Für ${t} wurde die Rückgabe angefragt (${p.owner_name}, ${p.borrower_name}).`
     case 'loan_returned': return `Die Rückgabe von ${t} wurde bestätigt.`
+    case 'puzzle_deleted': return `${p.from_name} hat das Puzzle ${t} gelöscht. Dein Exemplar wurde damit ebenfalls aus dem Regal entfernt.`
     case 'copy_transferred': return `${p.from_name} hat dir das Puzzle ${t} übertragen. Es steht jetzt in deinem Regal.`
     default: return 'Neue Mitteilung.'
   }

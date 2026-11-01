@@ -43,6 +43,12 @@ Spaltenverbot ausgenommen. Das Spaltenverbot wirkte nicht. Verhindert wurde ein 
 Zeilenregel, aber an der falschen Stelle. Seit 0005 sind nur `is_lendable` und `note` direkt schreibbar, und ein
 Test prüft die Spaltenrechte aller sensiblen Spalten direkt (`sensible_spalten_sind_per_spaltenrecht_gesperrt`).
 
+## Puzzle löschen (Migration 0009)
+`puzzle_delete_info` meldet vorab, was gelöscht würde oder was es verhindert. `delete_puzzle` löscht atomar Zeiten, Exemplare und das Puzzle.
+Gesperrt ist es bei Verknüpfung mit einer Meisterschaftsrunde (sonst ginge die Rangschätzung verloren). Nicht-Admins dürfen nur löschen, wenn nichts
+Fremdes (Exemplare, Zeiten, Ausleihverlauf) daran hängt. Admins brauchen dafür eine ausdrückliche Bestätigung, betroffene Personen werden benachrichtigt.
+Das Foto entfernt die App nach dem Löschen selbst (die Datenbank darf Dateien im Speicher nicht direkt löschen).
+
 ## Sicherheits-Korrektur in Migration 0008 (Funktionsrechte)
 PostgreSQL erlaubt neu erstellte Funktionen standardmässig für **alle**, auch für nicht angemeldete Besucher. Ein Entziehen nur im Schema `public`
 (Migration 0001) wirkt dafür nicht. Fast alle Funktionen prüften deshalb selbst die Anmeldung und wiesen Besucher ab, drei interne Hilfsfunktionen
@@ -59,7 +65,6 @@ PostgreSQL erlaubt neu erstellte Funktionen standardmässig für **alle**, auch 
 - Wer eine Ausleihe stornieren will, nachdem das Puzzle übergeben wurde, muss die Rückgabe durchlaufen.
 - Mitglieder können beim Erfassen eines Puzzles Veranstaltungen und Runden neu anlegen (finden oder anlegen). Es gibt noch
   keine Oberfläche, um falsche Einträge zu löschen (Admin vorerst per SQL). Kommt mit Phase 5.
-- Puzzles können in der Oberfläche nicht gelöscht werden (nur Admin per SQL; Exemplare und Versuche blockieren es bewusst).
 - Bei Versuchen lassen sich Puzzle und Teilnehmende nicht nachträglich ändern (löschen und neu erfassen).
 - Keine Seitenaufteilung der Listen: ausgelegt auf eine Community mit einigen hundert Puzzles.
 - Ausleihen und Rangschätzung: Phasen 4 und 5.
